@@ -548,7 +548,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
             const by = labelY - boxH / 2
 
             // Box background
-            ctx.fillStyle = '#1a1a2eee'
+            ctx.fillStyle = '#ffffffee'
             ctx.strokeStyle = isDimensioned ? '#00880088' : '#0066cc88'
             ctx.lineWidth = 1
             ctx.beginPath()
@@ -707,7 +707,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         const boxH = 22
 
         // Dark bg box (Fusion 360 style)
-        ctx.fillStyle = '#1a1a2eee'
+        ctx.fillStyle = '#ffffffee'
         ctx.strokeStyle = '#0055aa88'
         ctx.lineWidth = 1
         ctx.beginPath()
@@ -724,7 +724,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       // Start/end points
       ctx.fillStyle = '#0055aa'
       ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI * 2); ctx.fill()
-      ctx.fillStyle = '#00ffaa'
+      ctx.fillStyle = '#009944'
       ctx.beginPath(); ctx.arc(ex, ey, 4, 0, Math.PI * 2); ctx.fill()
     }
 
@@ -1619,9 +1619,9 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
             className="border-2 rounded px-2 py-1 text-sm text-center font-bold shadow-lg outline-none"
             style={{
               width: 150,
-              background: '#1a1a2e',
-              borderColor: '#0066cc',
-              color: '#0066cc',
+              background: '#ffffff',
+              borderColor: '#0055aa',
+              color: '#0055aa',
               fontSize: 20,
               touchAction: 'auto',
               WebkitUserSelect: 'text',
