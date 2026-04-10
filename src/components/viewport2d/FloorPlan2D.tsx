@@ -26,6 +26,7 @@ type DragTarget =
   | { type: 'wall-end'; wallId: string }
   | { type: 'wall-move'; wallId: string; offsetX: number; offsetY: number }
   | { type: 'column-move'; columnId: string; offsetX: number; offsetY: number }
+  | { type: 'opening-move'; wallId: string; openingId: string }
   | { type: 'pan'; startPanX: number; startPanY: number; startMouseX: number; startMouseY: number }
   | null
 
@@ -451,6 +452,22 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           ctx.lineTo(ox2, oy2)
           ctx.stroke()
         }
+
+        // Opening width label (small, centered on opening)
+        const omx = (ox1 + ox2) / 2
+        const omy = (oy1 + oy2) / 2
+        const labelOff = halfT + 10
+        const lx = omx - nx * labelOff
+        const ly = omy - ny * labelOff
+        ctx.font = '10px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        const wLabel = `${Math.round(op.width)}`
+        const tw = ctx.measureText(wLabel).width
+        ctx.fillStyle = '#ffffffcc'
+        ctx.fillRect(lx - tw / 2 - 2, ly - 6, tw + 4, 12)
+        ctx.fillStyle = op.type === 'door' ? '#8B4513' : '#0066cc'
+        ctx.fillText(wLabel, lx, ly)
       })
 
       // Endpoint dots — show connected (green) vs open (gray/blue)
@@ -1033,6 +1050,36 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     return null
   }, [walls, getConstraintGlyphPos])
 
+  // Find opening at mouse position (for dragging openings along wall)
+  const findOpeningAt = (mx: number, my: number): { wallId: string; openingId: string } | null => {
+    for (const w of walls) {
+      if (w.openings.length === 0) continue
+      const [sx, sy] = toScreen(w.start.x, w.start.y)
+      const [ex, ey] = toScreen(w.end.x, w.end.y)
+      const ddx = ex - sx, ddy = ey - sy
+      const wLen = wallLength(w)
+      const len = Math.sqrt(ddx * ddx + ddy * ddy)
+      if (len < 1) continue
+      const nnx = -ddy / len, nny = ddx / len
+      const halfT = Math.max(3, (w.thickness / 2) * scale)
+      for (const op of w.openings) {
+        const t1 = op.offsetFromStart / wLen
+        const t2 = (op.offsetFromStart + op.width) / wLen
+        const ox1 = sx + ddx * t1, oy1 = sy + ddy * t1
+        const ox2 = sx + ddx * t2, oy2 = sy + ddy * t2
+        // Check point-in-rectangle (opening area with thickness)
+        const cx = (ox1 + ox2) / 2, cy = (oy1 + oy2) / 2
+        const relX = (mx - cx) * (ddx / len) + (my - cy) * (ddy / len)
+        const relY = (mx - cx) * nnx + (my - cy) * nny
+        const halfW = Math.sqrt((ox2 - ox1) ** 2 + (oy2 - oy1) ** 2) / 2
+        if (Math.abs(relX) < halfW + 4 && Math.abs(relY) < halfT + 4) {
+          return { wallId: w.id, openingId: op.id }
+        }
+      }
+    }
+    return null
+  }
+
   const findWallAt = (mx: number, my: number): { wallId: string; part: 'start' | 'end' | 'body'; t?: number } | null => {
     const hitR = 8
     for (const w of walls) {
@@ -1361,7 +1408,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     if (sketchTool === 'door' || sketchTool === 'window') {
       const hit = findWallAt(mx, my)
       if (hit) {
-        addOpening(hit.wallId, sketchTool)
+        addOpening(hit.wallId, sketchTool, hit.t)
         selectWall(hit.wallId)
       }
       return
@@ -1383,6 +1430,15 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         offsetX: wx - col.position.x, offsetY: wy - col.position.y,
       })
       selectWall(null)
+      return
+    }
+
+    // Check opening hit first (for dragging along wall)
+    const openingHit = findOpeningAt(mx, my)
+    if (openingHit) {
+      selectWall(openingHit.wallId)
+      useRoomStore.getState().pushHistory()
+      setDragTarget({ type: 'opening-move', wallId: openingHit.wallId, openingId: openingHit.openingId })
       return
     }
 
@@ -1463,7 +1519,8 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         } else {
           // Select tool
           const dimHit = findDimAt(mx, my)
-          canvas.style.cursor = dimHit ? 'text' : col ? 'move' : hit ? (hit.part === 'body' ? 'move' : 'crosshair') : 'default'
+          const opHit = findOpeningAt(mx, my)
+          canvas.style.cursor = dimHit ? 'text' : opHit ? 'grab' : col ? 'move' : hit ? (hit.part === 'body' ? 'move' : 'crosshair') : 'default'
         }
       }
       return
@@ -1480,6 +1537,25 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
     if (dragTarget.type === 'column-move') {
       updateColumn(dragTarget.columnId, { position: { x: snappedX, y: snappedY } })
+      return
+    }
+
+    if (dragTarget.type === 'opening-move') {
+      const w = walls.find(ww => ww.id === dragTarget.wallId)
+      if (!w) return
+      const op = w.openings.find(o => o.id === dragTarget.openingId)
+      if (!op) return
+      const wLen = wallLength(w)
+      // Project world point onto wall to get offset
+      const wdx = w.end.x - w.start.x
+      const wdy = w.end.y - w.start.y
+      const t = ((wx - w.start.x) * wdx + (wy - w.start.y) * wdy) / (wdx * wdx + wdy * wdy)
+      let newOffset = t * wLen - op.width / 2
+      newOffset = Math.max(0, Math.min(wLen - op.width, newOffset))
+      newOffset = Math.round(newOffset / 50) * 50
+      if (Math.abs(newOffset - op.offsetFromStart) > 1) {
+        useRoomStore.getState().updateOpeningNoHistory(dragTarget.wallId, dragTarget.openingId, { offsetFromStart: newOffset })
+      }
       return
     }
 

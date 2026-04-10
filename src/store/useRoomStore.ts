@@ -172,8 +172,9 @@ interface RoomState {
   updateWall: (id: string, updates: Partial<Pick<Wall, 'start' | 'end' | 'thickness' | 'height' | 'constraint' | 'dimensionValue'>>) => void
   removeWall: (id: string) => void
   selectWall: (id: string | null) => void
-  addOpening: (wallId: string, type: 'door' | 'window') => void
+  addOpening: (wallId: string, type: 'door' | 'window', clickOffsetRatio?: number) => void
   updateOpening: (wallId: string, openingId: string, updates: Partial<Opening>) => void
+  updateOpeningNoHistory: (wallId: string, openingId: string, updates: Partial<Opening>) => void
   removeOpening: (wallId: string, openingId: string) => void
   addColumn: (position: Point2D) => void
   updateColumn: (id: string, updates: Partial<Omit<Column, 'id'>>) => void
@@ -309,7 +310,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   selectWall: (id) => set({ selectedWallId: id }),
 
-  addOpening: (wallId, type) => {
+  addOpening: (wallId, type, clickOffsetRatio) => {
     get().pushHistory()
     set(s => {
       const wall = s.walls.find(w => w.id === wallId)
@@ -317,12 +318,25 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       const dx = wall.end.x - wall.start.x
       const dy = wall.end.y - wall.start.y
       const wallLen = Math.sqrt(dx * dx + dy * dy)
+      const openingW = type === 'door' ? 900 : 1200
+
+      // Place at click position (centered on click), clamp to wall bounds
+      let offset: number
+      if (clickOffsetRatio !== undefined) {
+        offset = clickOffsetRatio * wallLen - openingW / 2
+      } else {
+        offset = (wallLen - openingW) / 2
+      }
+      // Clamp: at least 0, at most wallLen - openingW
+      offset = Math.max(0, Math.min(wallLen - openingW, offset))
+      // Snap to 50mm grid
+      offset = Math.round(offset / 50) * 50
 
       const opening: Opening = {
         id: uuid(),
         type,
-        offsetFromStart: Math.max(200, (wallLen - (type === 'door' ? 900 : 1200)) / 2),
-        width: type === 'door' ? 900 : 1200,
+        offsetFromStart: offset,
+        width: openingW,
         height: type === 'door' ? 2100 : 1200,
         sillHeight: type === 'door' ? 0 : 900,
       }
@@ -334,6 +348,15 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   updateOpening: (wallId, openingId, updates) => {
     get().pushHistory()
+    set(s => ({
+      walls: s.walls.map(w => w.id === wallId ? {
+        ...w,
+        openings: w.openings.map(o => o.id === openingId ? { ...o, ...updates } : o)
+      } : w)
+    }))
+  },
+
+  updateOpeningNoHistory: (wallId, openingId, updates) => {
     set(s => ({
       walls: s.walls.map(w => w.id === wallId ? {
         ...w,
