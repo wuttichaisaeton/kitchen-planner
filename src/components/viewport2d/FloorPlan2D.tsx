@@ -292,44 +292,42 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
     const [ox, oy] = toScreen(0, 0)
 
-    // --- Draw sketch lines (walls as thin lines — Fusion 360 style) ---
+    // === PASS 1: Draw all walls as thick filled rectangles ===
     walls.forEach(w => {
       const [sx, sy] = toScreen(w.start.x, w.start.y)
       const [ex, ey] = toScreen(w.end.x, w.end.y)
+      const dx = ex - sx
+      const dy = ey - sy
+      const len = Math.sqrt(dx * dx + dy * dy)
+      if (len < 1) return
+      const nx = -dy / len
+      const ny = dx / len
+      const halfT = (w.thickness / 2) * scale
+
       const isSelected = w.id === selectedWallId
       const isHovered = w.id === hoverWallId
       const isEditing = w.id === editingDimWallId
       const isTrimHover = sketchTool === 'trim' && isHovered
 
-      // Determine constraint state for color
-      const isConstrained = !!(w.constraint)
-      // Wall line colors on white background
-      if (isTrimHover) {
-        ctx.strokeStyle = '#ff0000'
-        ctx.lineWidth = 3
-      } else if (isEditing) {
-        ctx.strokeStyle = '#0066cc'
-        ctx.lineWidth = 2.5
-      } else if (isSelected) {
-        ctx.strokeStyle = '#0055aa'
-        ctx.lineWidth = 2.5
-      } else if (isHovered) {
-        ctx.strokeStyle = '#3388cc'
-        ctx.lineWidth = 2
-      } else if (isConstrained) {
-        ctx.strokeStyle = '#222222'
-        ctx.lineWidth = 1.5
-      } else {
-        ctx.strokeStyle = '#555555'
-        ctx.lineWidth = 1.5
-      }
+      // Wall fill color
+      ctx.fillStyle = isTrimHover ? '#ffcccc' : isEditing ? '#336699' : isSelected ? '#334466' : isHovered ? '#444455' : '#222222'
+      ctx.strokeStyle = isTrimHover ? '#ff0000' : isEditing ? '#0066cc' : isSelected ? '#0055aa' : isHovered ? '#3388cc' : '#111111'
+      ctx.lineWidth = 1
 
       ctx.beginPath()
-      ctx.moveTo(sx, sy)
-      ctx.lineTo(ex, ey)
+      ctx.moveTo(sx + nx * halfT, sy + ny * halfT)
+      ctx.lineTo(ex + nx * halfT, ey + ny * halfT)
+      ctx.lineTo(ex - nx * halfT, ey - ny * halfT)
+      ctx.lineTo(sx - nx * halfT, sy - ny * halfT)
+      ctx.closePath()
+      ctx.fill()
       ctx.stroke()
+    })
 
-      // Openings visualization
+    // === PASS 2: Cut openings and draw symbols ===
+    walls.forEach(w => {
+      const [sx, sy] = toScreen(w.start.x, w.start.y)
+      const [ex, ey] = toScreen(w.end.x, w.end.y)
       const dx = ex - sx
       const dy = ey - sy
       const len = Math.sqrt(dx * dx + dy * dy)
@@ -338,7 +336,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       const uy = dy / len
       const nx = -uy
       const ny = ux
-      const thick = w.thickness * scale
+      const halfT = (w.thickness / 2) * scale
 
       w.openings.forEach(op => {
         const wLen = wallLength(w)
@@ -348,27 +346,43 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         const oy1 = sy + dy * t
         const ox2 = sx + dx * t2
         const oy2 = sy + dy * t2
-        const clearR = Math.max(6, (w.thickness / 2) * scale + 4)
+
+        // --- Clear the opening gap (white rectangle cutting through the wall) ---
+        ctx.fillStyle = '#ffffff'
+        ctx.beginPath()
+        ctx.moveTo(ox1 + nx * (halfT + 1), oy1 + ny * (halfT + 1))
+        ctx.lineTo(ox2 + nx * (halfT + 1), oy2 + ny * (halfT + 1))
+        ctx.lineTo(ox2 - nx * (halfT + 1), oy2 - ny * (halfT + 1))
+        ctx.lineTo(ox1 - nx * (halfT + 1), oy1 - ny * (halfT + 1))
+        ctx.closePath()
+        ctx.fill()
 
         if (op.type === 'door') {
+          // --- Door: wall stubs at edges + leaf + arc ---
+          // Wall edge stubs (short thick lines at opening edges)
+          ctx.strokeStyle = '#222222'
+          ctx.lineWidth = 2
+          ctx.beginPath()
+          ctx.moveTo(ox1 + nx * halfT, oy1 + ny * halfT)
+          ctx.lineTo(ox1 - nx * halfT, oy1 - ny * halfT)
+          ctx.stroke()
+          ctx.beginPath()
+          ctx.moveTo(ox2 + nx * halfT, oy2 + ny * halfT)
+          ctx.lineTo(ox2 - nx * halfT, oy2 - ny * halfT)
+          ctx.stroke()
+
           // Door properties
           const hingeAtStart = (op.hingePosition || 'start') === 'start'
           const swingSign = (op.swingSide || 'inside') === 'inside' ? 1 : -1
-
-          // Hinge and free points
           const hx = hingeAtStart ? ox1 : ox2
           const hy = hingeAtStart ? oy1 : oy2
           const fx = hingeAtStart ? ox2 : ox1
           const fy = hingeAtStart ? oy2 : oy1
-
-          // Door screen width (radius of arc)
           const doorR = Math.sqrt((ox2 - ox1) ** 2 + (oy2 - oy1) ** 2)
 
-          // Perpendicular direction from hinge (the open door leaf position)
+          // Leaf line
           const leafX = hx + nx * swingSign * doorR
           const leafY = hy + ny * swingSign * doorR
-
-          // Door leaf line (straight line from hinge to leaf end)
           ctx.strokeStyle = '#333333'
           ctx.lineWidth = 1.5
           ctx.beginPath()
@@ -376,7 +390,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           ctx.lineTo(leafX, leafY)
           ctx.stroke()
 
-          // Door swing arc (quarter circle from leaf to wall opening)
+          // Arc
           const leafAngle = Math.atan2(leafY - hy, leafX - hx)
           const freeAngle = Math.atan2(fy - hy, fx - hx)
           ctx.strokeStyle = '#999999'
@@ -386,48 +400,49 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           let diff = freeAngle - leafAngle
           while (diff > Math.PI) diff -= 2 * Math.PI
           while (diff < -Math.PI) diff += 2 * Math.PI
-          const ccw = diff < 0
-          ctx.arc(hx, hy, doorR, leafAngle, freeAngle, ccw)
+          ctx.arc(hx, hy, doorR, leafAngle, freeAngle, diff < 0)
           ctx.stroke()
           ctx.setLineDash([])
+
         } else if (op.type === 'fixed-glass') {
-          // Fixed glass — filled blue rectangle (no opening mechanism)
-          const glassR = clearR * 0.5
-          ctx.fillStyle = 'rgba(100, 180, 255, 0.25)'
+          // --- Fixed glass: blue-tinted rectangle with X ---
+          ctx.fillStyle = 'rgba(100, 180, 255, 0.3)'
           ctx.beginPath()
-          ctx.moveTo(ox1 + nx * glassR, oy1 + ny * glassR)
-          ctx.lineTo(ox2 + nx * glassR, oy2 + ny * glassR)
-          ctx.lineTo(ox2 - nx * glassR, oy2 - ny * glassR)
-          ctx.lineTo(ox1 - nx * glassR, oy1 - ny * glassR)
+          ctx.moveTo(ox1 + nx * halfT, oy1 + ny * halfT)
+          ctx.lineTo(ox2 + nx * halfT, oy2 + ny * halfT)
+          ctx.lineTo(ox2 - nx * halfT, oy2 - ny * halfT)
+          ctx.lineTo(ox1 - nx * halfT, oy1 - ny * halfT)
           ctx.closePath()
           ctx.fill()
-          // Outer frame
+          // Frame
           ctx.strokeStyle = '#333333'
-          ctx.lineWidth = 1.2
+          ctx.lineWidth = 1.5
           ctx.stroke()
-          // X cross (fixed glass symbol)
+          // X cross
           ctx.strokeStyle = '#0066cc'
           ctx.lineWidth = 0.8
           ctx.beginPath()
-          ctx.moveTo(ox1 + nx * glassR, oy1 + ny * glassR)
-          ctx.lineTo(ox2 - nx * glassR, oy2 - ny * glassR)
-          ctx.moveTo(ox2 + nx * glassR, oy2 + ny * glassR)
-          ctx.lineTo(ox1 - nx * glassR, oy1 - ny * glassR)
+          ctx.moveTo(ox1 + nx * halfT, oy1 + ny * halfT)
+          ctx.lineTo(ox2 - nx * halfT, oy2 - ny * halfT)
+          ctx.moveTo(ox2 + nx * halfT, oy2 + ny * halfT)
+          ctx.lineTo(ox1 - nx * halfT, oy1 - ny * halfT)
           ctx.stroke()
+
         } else {
-          // Window — three parallel lines
-          const lineOff = clearR * 0.5
+          // --- Window: three parallel lines within wall thickness ---
           ctx.strokeStyle = '#333333'
           ctx.lineWidth = 1.5
+          // Outer line 1
           ctx.beginPath()
-          ctx.moveTo(ox1 + nx * lineOff, oy1 + ny * lineOff)
-          ctx.lineTo(ox2 + nx * lineOff, oy2 + ny * lineOff)
+          ctx.moveTo(ox1 + nx * halfT, oy1 + ny * halfT)
+          ctx.lineTo(ox2 + nx * halfT, oy2 + ny * halfT)
           ctx.stroke()
+          // Outer line 2
           ctx.beginPath()
-          ctx.moveTo(ox1 - nx * lineOff, oy1 - ny * lineOff)
-          ctx.lineTo(ox2 - nx * lineOff, oy2 - ny * lineOff)
+          ctx.moveTo(ox1 - nx * halfT, oy1 - ny * halfT)
+          ctx.lineTo(ox2 - nx * halfT, oy2 - ny * halfT)
           ctx.stroke()
-          // Center line (glass — blue)
+          // Center glass line (blue)
           ctx.strokeStyle = '#0066cc'
           ctx.lineWidth = 1
           ctx.beginPath()
@@ -436,10 +451,10 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           ctx.stroke()
         }
 
-        // Opening width label (small, centered on opening)
+        // Opening width label
         const omx = (ox1 + ox2) / 2
         const omy = (oy1 + oy2) / 2
-        const labelOff = clearR + 10
+        const labelOff = halfT + 14
         const lx = omx - nx * labelOff
         const ly = omy - ny * labelOff
         ctx.font = '10px sans-serif'
