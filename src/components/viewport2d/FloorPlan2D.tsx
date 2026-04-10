@@ -1171,7 +1171,9 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       const px = sx + t * dx
       const py = sy + t * dy
       const dist = Math.sqrt((mx - px) ** 2 + (my - py) ** 2)
-      if (dist < 8) return { wallId: w.id, part: 'body', t }
+      // Use wall's actual screen thickness for hit detection (click anywhere on the black fill)
+      const halfThick = Math.max(hitR, (w.thickness / 2) * scale + 2)
+      if (dist < halfThick) return { wallId: w.id, part: 'body', t }
     }
     return null
   }
