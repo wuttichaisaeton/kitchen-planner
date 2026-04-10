@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react'
 import { useUIStore, type SketchTool } from '../../store/useUIStore'
+import { useRoomStore } from '../../store/useRoomStore'
 
 const tools: { id: SketchTool; label: string; group: string; shortcut: string; icon: ReactElement }[] = [
   // ─── CREATE ───
@@ -298,9 +299,18 @@ export default function SketchToolbar() {
 
 export function SketchStatusBar() {
   const sketchTool = useUIStore(s => s.sketchTool)
+  const applyHVAll = useRoomStore(s => s.applyHVConstraintAll)
   return (
-    <div className="h-6 bg-[#161628] border-t border-gray-700/50 flex items-center px-3">
-      <span className="text-[11px] text-gray-400">{statusText[sketchTool] || 'Select a tool'}</span>
+    <div className="h-7 bg-[#161628] border-t border-gray-700/50 flex items-center px-3 gap-3">
+      <span className="text-[11px] text-gray-400 flex-1">{statusText[sketchTool] || 'Select a tool'}</span>
+      {sketchTool === 'hv' && (
+        <button
+          onClick={applyHVAll}
+          className="bg-amber-700 hover:bg-amber-600 text-white text-[10px] font-bold px-3 py-0.5 rounded"
+        >
+          H/V All
+        </button>
+      )}
     </div>
   )
 }
