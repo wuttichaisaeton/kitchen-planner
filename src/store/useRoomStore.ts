@@ -277,10 +277,10 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   setRoomRect: (w, d) => {
     get().pushHistory()
     const walls: Wall[] = [
-      { id: uuid(), start: { x: 0, y: 0 }, end: { x: w, y: 0 }, thickness: 150, height: 2700, openings: [], label: 'Back Wall' },
-      { id: uuid(), start: { x: w, y: 0 }, end: { x: w, y: d }, thickness: 150, height: 2700, openings: [], label: 'Right Wall' },
-      { id: uuid(), start: { x: w, y: d }, end: { x: 0, y: d }, thickness: 150, height: 2700, openings: [], label: 'Front Wall' },
-      { id: uuid(), start: { x: 0, y: d }, end: { x: 0, y: 0 }, thickness: 150, height: 2700, openings: [], label: 'Left Wall' },
+      { id: uuid(), start: { x: 0, y: 0 }, end: { x: w, y: 0 }, thickness: 200, height: 2700, openings: [], label: 'Back Wall' },
+      { id: uuid(), start: { x: w, y: 0 }, end: { x: w, y: d }, thickness: 200, height: 2700, openings: [], label: 'Right Wall' },
+      { id: uuid(), start: { x: w, y: d }, end: { x: 0, y: d }, thickness: 200, height: 2700, openings: [], label: 'Front Wall' },
+      { id: uuid(), start: { x: 0, y: d }, end: { x: 0, y: 0 }, thickness: 200, height: 2700, openings: [], label: 'Left Wall' },
     ]
     set({ walls })
   },
@@ -288,7 +288,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   addWall: (start, end) => {
     get().pushHistory()
     set(s => {
-      const newWall: Wall = { id: uuid(), start, end, thickness: 150, height: 2700, openings: [], label: `Wall ${s.walls.length + 1}` }
+      const newWall: Wall = { id: uuid(), start, end, thickness: 200, height: 2700, openings: [], label: `Wall ${s.walls.length + 1}` }
       // Auto-join: snap endpoints to nearby existing wall endpoints
       const joined = autoJoinWall(newWall, s.walls)
       return { walls: [...s.walls, joined] }

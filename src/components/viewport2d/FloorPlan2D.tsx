@@ -380,19 +380,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         const oy1 = sy + dy * t
         const ox2 = sx + dx * t2
         const oy2 = sy + dy * t2
-        // clearR must be large enough to cut through polygon fill
-        // Find max perpendicular distance from this wall to any other wall endpoint
-        let maxPerpDist = (w.thickness / 2) * scale + 4
-        walls.forEach(other => {
-          if (other.id === w.id) return
-          for (const pt of [other.start, other.end]) {
-            const [ptx, pty] = toScreen(pt.x, pt.y)
-            // Perpendicular distance from pt to this wall line
-            const perpDist = Math.abs((ptx - sx) * nx + (pty - sy) * ny)
-            if (perpDist > maxPerpDist) maxPerpDist = perpDist
-          }
-        })
-        const clearR = Math.max(6, maxPerpDist + 4)
+        const clearR = (w.thickness / 2) * scale
 
         // Clear the opening gap — white rectangle to cut through polygon fill
         ctx.fillStyle = '#ffffff'
