@@ -76,6 +76,9 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
   // Constraint: first wall selected (for two-click constraints)
   const [constraintFirstWallId, setConstraintFirstWallId] = useState<string | null>(null)
 
+  // Coincident: first selected point { wallId, part, point }
+  const [coincidentFirst, setCoincidentFirst] = useState<{ wallId: string; part: 'start' | 'end'; point: Point2D } | null>(null)
+
   // Lasso join — drag circle around endpoints to merge them
   const [lassoStart, setLassoStart] = useState<{ sx: number; sy: number } | null>(null)
   const [lassoEnd, setLassoEnd] = useState<{ sx: number; sy: number } | null>(null)
@@ -190,6 +193,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         setDrawStart(null)
         setRectStart(null)
         setConstraintFirstWallId(null)
+        setCoincidentFirst(null)
         setSelectedConstraintWallId(null)
         setSketchTool('select')
         return
@@ -228,6 +232,8 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
       if (e.key === ' ') {
         e.preventDefault()
+        setCoincidentFirst(null)
+        setConstraintFirstWallId(null)
         setSketchTool('select')
         return
       }
@@ -939,7 +945,40 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       }
     }
 
-  }, [walls, columns, guides, items, panX, panY, scale, selectedWallId, hoverWallId, hoveredConstraintWallId, selectedConstraintWallId, toScreen, editingDimWallId, drawStart, rectStart, mouseWorld, sketchTool, snapToEndpoint, dragTarget, getDimScreenPos, canvasReady, distoHook, lassoStart, lassoEnd])
+    // --- Coincident tool: highlight all endpoints when tool is active ---
+    if (sketchTool === 'coincident') {
+      walls.forEach(w => {
+        for (const [pt, part] of [[w.start, 'start'], [w.end, 'end']] as const) {
+          const [px, py] = toScreen(pt.x, pt.y)
+          // Highlight the first selected point with a pulsing ring
+          if (coincidentFirst && coincidentFirst.wallId === w.id && coincidentFirst.part === part) {
+            ctx.strokeStyle = '#ffcc00'
+            ctx.lineWidth = 2.5
+            ctx.beginPath()
+            ctx.arc(px, py, 10, 0, Math.PI * 2)
+            ctx.stroke()
+            ctx.fillStyle = '#ffcc00'
+            ctx.beginPath()
+            ctx.arc(px, py, 4, 0, Math.PI * 2)
+            ctx.fill()
+          } else {
+            // Show all endpoints as hollow circles (targets)
+            ctx.strokeStyle = '#ffcc0088'
+            ctx.lineWidth = 1.5
+            ctx.beginPath()
+            ctx.arc(px, py, 7, 0, Math.PI * 2)
+            ctx.stroke()
+          }
+        }
+      })
+      // Show "Select 1st point" or "Select 2nd point" hint
+      ctx.fillStyle = '#ffcc00'
+      ctx.font = 'bold 12px sans-serif'
+      ctx.textAlign = 'left'
+      ctx.fillText(coincidentFirst ? '⬤ Select 2nd point to merge' : '○ Select 1st point', 10, H - 30)
+    }
+
+  }, [walls, columns, guides, items, panX, panY, scale, selectedWallId, hoverWallId, hoveredConstraintWallId, selectedConstraintWallId, toScreen, editingDimWallId, drawStart, rectStart, mouseWorld, sketchTool, snapToEndpoint, dragTarget, getDimScreenPos, canvasReady, distoHook, lassoStart, lassoEnd, coincidentFirst])
 
   // Force initial draw + resize observer
   useEffect(() => {
@@ -1007,6 +1046,25 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       if (dist < 8) return { wallId: w.id, part: 'body', t }
     }
     return null
+  }
+
+  // Find the closest endpoint near mouse position (for Coincident tool)
+  const findEndpointAt = (mx: number, my: number): { wallId: string; part: 'start' | 'end'; point: Point2D } | null => {
+    const hitR = 12 // generous hit radius for endpoints
+    let best: { wallId: string; part: 'start' | 'end'; point: Point2D; dist: number } | null = null
+    for (const w of walls) {
+      const [sx, sy] = toScreen(w.start.x, w.start.y)
+      const [ex, ey] = toScreen(w.end.x, w.end.y)
+      const dStart = Math.sqrt((mx - sx) ** 2 + (my - sy) ** 2)
+      const dEnd = Math.sqrt((mx - ex) ** 2 + (my - ey) ** 2)
+      if (dStart < hitR && (!best || dStart < best.dist)) {
+        best = { wallId: w.id, part: 'start', point: w.start, dist: dStart }
+      }
+      if (dEnd < hitR && (!best || dEnd < best.dist)) {
+        best = { wallId: w.id, part: 'end', point: w.end, dist: dEnd }
+      }
+    }
+    return best ? { wallId: best.wallId, part: best.part, point: best.point } : null
   }
 
   const findGuideAt = (mx: number, my: number): string | null => {
@@ -1266,41 +1324,23 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     }
 
     if (sketchTool === 'coincident') {
-      const hit = findWallAt(mx, my)
-      if (!hit) return
-      if (!constraintFirstWallId) {
-        setConstraintFirstWallId(hit.wallId)
-        selectWall(hit.wallId)
+      const ep = findEndpointAt(mx, my)
+      if (!ep) return
+      if (!coincidentFirst) {
+        // First click — select this endpoint
+        setCoincidentFirst(ep)
+        selectWall(ep.wallId)
         return
       }
-      const firstWall = walls.find(ww => ww.id === constraintFirstWallId)
-      if (!firstWall || firstWall.id === hit.wallId) {
-        setConstraintFirstWallId(null)
+      // Second click — merge: move second point to first point
+      // (skip if same exact point)
+      if (ep.wallId === coincidentFirst.wallId && ep.part === coincidentFirst.part) {
+        setCoincidentFirst(null)
         return
       }
-      const secondWall = walls.find(ww => ww.id === hit.wallId)
-      if (!secondWall) { setConstraintFirstWallId(null); return }
-
-      // Find the closest pair of endpoints between the two walls
-      const pairs: { d: number; firstPart: 'start' | 'end'; secondPart: 'start' | 'end' }[] = []
-      for (const fp of ['start', 'end'] as const) {
-        for (const sp of ['start', 'end'] as const) {
-          const dx = firstWall[fp].x - secondWall[sp].x
-          const dy = firstWall[fp].y - secondWall[sp].y
-          pairs.push({ d: Math.sqrt(dx * dx + dy * dy), firstPart: fp, secondPart: sp })
-        }
-      }
-      pairs.sort((a, b) => a.d - b.d)
-      const best = pairs[0]
-
-      // Move second wall's endpoint to first wall's endpoint
-      const targetPt = firstWall[best.firstPart]
-      useRoomStore.getState().pushHistory()
-      updateWall(hit.wallId, { [best.secondPart]: { x: targetPt.x, y: targetPt.y } })
-      useRoomStore.getState().autoJoinAll()
-      useRoomStore.getState().enforceConstraints()
-      setConstraintFirstWallId(null)
-      selectWall(hit.wallId)
+      useRoomStore.getState().applyCoincident(ep.wallId, ep.part, coincidentFirst.point)
+      setCoincidentFirst(null)
+      selectWall(ep.wallId)
       return
     }
 

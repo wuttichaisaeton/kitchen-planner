@@ -140,6 +140,7 @@ interface RoomState {
   applyDimension: (wallId: string, newLength: number) => void
   isOverConstrained: (wallId: string) => boolean
   removeDimension: (wallId: string) => void
+  applyCoincident: (wallId: string, part: 'start' | 'end', targetPoint: Point2D) => void
   autoJoinAll: () => void
   enforceConstraints: () => void
   clearWalls: () => void
@@ -486,6 +487,34 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     set(s => ({
       walls: s.walls.map(w => w.id === wallId ? { ...w, dimensioned: false } : w)
     }))
+  },
+
+  // Coincident constraint — move a wall's endpoint to a target point, propagate to all connected walls
+  applyCoincident: (wallId: string, part: 'start' | 'end', targetPoint: Point2D) => {
+    get().pushHistory()
+    const { walls } = get()
+    const EPS = 5
+
+    // Find the wall and its current endpoint position
+    const wall = walls.find(w => w.id === wallId)
+    if (!wall) return
+    const oldPt = wall[part]
+
+    // Move this wall's endpoint + propagate to all walls sharing the same old point
+    let newWalls = walls.map(w => {
+      const updated = { ...w }
+      if (Math.abs(w.start.x - oldPt.x) < EPS && Math.abs(w.start.y - oldPt.y) < EPS) {
+        updated.start = { x: targetPoint.x, y: targetPoint.y }
+      }
+      if (Math.abs(w.end.x - oldPt.x) < EPS && Math.abs(w.end.y - oldPt.y) < EPS) {
+        updated.end = { x: targetPoint.x, y: targetPoint.y }
+      }
+      return updated
+    })
+
+    // Enforce H/V constraints after merge
+    newWalls = enforceAllConstraints(newWalls)
+    set({ walls: newWalls })
   },
 
   // Auto-join all walls — merge any endpoints within threshold
