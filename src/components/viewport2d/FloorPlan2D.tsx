@@ -100,6 +100,11 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
   const [editingDimWallId, setEditingDimWallId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
 
+  // Editable opening offset
+  const [editingOpening, setEditingOpening] = useState<{ wallId: string; openingId: string } | null>(null)
+  const [editOpeningValue, setEditOpeningValue] = useState('')
+  const openingInputRef = useRef<HTMLInputElement>(null)
+
   const toScreen = useCallback((wx: number, wy: number): [number, number] => {
     return [wx * scale + panX, wy * scale + panY]
   }, [scale, panX, panY])
@@ -1316,6 +1321,15 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     setEditingDimWallId(null)
   }
 
+  const applyOpeningOffsetEdit = () => {
+    if (!editingOpening) return
+    const val = parseDimValue(editOpeningValue)
+    if (val < 0) { setEditingOpening(null); return }
+    useRoomStore.getState().pushHistory()
+    useRoomStore.getState().updateOpening(editingOpening.wallId, editingOpening.openingId, { offsetFromStart: val })
+    setEditingOpening(null)
+  }
+
   const openDimEditor = (wallId: string) => {
     const w = walls.find(ww => ww.id === wallId)
     if (!w) return
@@ -1360,8 +1374,18 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     }
   }, [editingDimWallId])
 
+  // Focus opening offset input
+  useEffect(() => {
+    if (editingOpening && openingInputRef.current) {
+      const el = openingInputRef.current
+      el.focus()
+      el.select()
+      setTimeout(() => { el.focus(); el.select() }, 50)
+    }
+  }, [editingOpening])
+
   const handleMouseDown = (e: React.MouseEvent) => {
-    if (editingDimWallId) return
+    if (editingDimWallId || editingOpening) return
     const [mx, my] = getMousePos(e)
     const [wx, wy] = toWorld(mx, my)
 
@@ -1632,9 +1656,22 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     }
   }
 
-  // Double-click on wall = open dimension editor (any tool)
+  // Double-click on opening = edit offset, on wall = edit dimension
   const handleDoubleClick = (e: React.MouseEvent) => {
     const [mx, my] = getMousePos(e)
+    // Check opening first
+    const opHit = findOpeningAt(mx, my)
+    if (opHit) {
+      const w = walls.find(ww => ww.id === opHit.wallId)
+      const op = w?.openings.find(o => o.id === opHit.openingId)
+      if (op) {
+        setEditingOpening(opHit)
+        setEditOpeningValue(String(Math.round(op.offsetFromStart)))
+        setEditingDimWallId(null)
+        selectWall(opHit.wallId)
+      }
+      return
+    }
     const hit = findWallAt(mx, my)
     if (hit) {
       openDimEditor(hit.wallId)
@@ -1974,6 +2011,55 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           </span>
         </div>
       )}
+      {/* Opening offset editor */}
+      {editingOpening && (() => {
+        const w = walls.find(ww => ww.id === editingOpening.wallId)
+        const op = w?.openings.find(o => o.id === editingOpening.openingId)
+        if (!w || !op) return null
+        const wLen = wallLength(w)
+        const [sx, sy] = toScreen(w.start.x, w.start.y)
+        const [ex, ey] = toScreen(w.end.x, w.end.y)
+        const dx = ex - sx, dy = ey - sy
+        const t = (op.offsetFromStart + op.width / 2) / wLen
+        const cx = sx + dx * t, cy = sy + dy * t
+        return (
+          <div
+            className="absolute flex flex-col items-center"
+            style={{ left: cx - 75, top: cy - 50, zIndex: 100 }}
+            onMouseDown={e => e.stopPropagation()}
+          >
+            <span style={{ color: '#8B4513', fontSize: 11, fontWeight: 700, marginBottom: 2 }}>
+              ระยะจากริมผนัง (mm)
+            </span>
+            <input
+              ref={openingInputRef}
+              type="text"
+              inputMode="decimal"
+              enterKeyHint="done"
+              value={editOpeningValue}
+              onFocus={e => e.target.select()}
+              onChange={e => setEditOpeningValue(e.target.value.replace(/[^0-9.,\s]/g, ''))}
+              onKeyDown={e => {
+                if (e.key === 'Enter') { e.preventDefault(); applyOpeningOffsetEdit() }
+                if (e.key === 'Escape') setEditingOpening(null)
+              }}
+              className="border-2 rounded px-2 py-1 text-sm text-center font-bold shadow-lg outline-none"
+              style={{ width: 150, background: '#fff', borderColor: '#8B4513', color: '#8B4513', fontSize: 20 }}
+              placeholder="mm"
+            />
+            <div className="flex gap-2 mt-1">
+              <button onClick={() => setEditingOpening(null)}
+                className="bg-gray-600 hover:bg-gray-500 text-white text-xs font-bold px-3 py-1.5 rounded">
+                Cancel
+              </button>
+              <button onClick={applyOpeningOffsetEdit}
+                className="bg-amber-700 hover:bg-amber-600 text-white text-xs font-bold px-4 py-1.5 rounded">
+                Apply
+              </button>
+            </div>
+          </div>
+        )
+      })()}
       {/* Zoom buttons — bottom-right */}
       <div className="absolute bottom-4 right-4 flex flex-col gap-1.5 z-30">
         <button
