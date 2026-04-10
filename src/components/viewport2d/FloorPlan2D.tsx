@@ -1631,6 +1631,18 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
             >
               Cancel
             </button>
+            {editingDimWallId && walls.find(w => w.id === editingDimWallId)?.dimensioned && (
+              <button
+                onClick={() => {
+                  useRoomStore.getState().removeDimension(editingDimWallId)
+                  setEditingDimWallId(null)
+                }}
+                className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-3 py-1.5 rounded"
+                style={{ touchAction: 'auto' }}
+              >
+                Remove
+              </button>
+            )}
             <button
               onClick={applyDimEdit}
               className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-1.5 rounded"
