@@ -292,52 +292,72 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
     const [ox, oy] = toScreen(0, 0)
 
-    // --- Draw each wall as a thick filled rectangle ---
+    // --- Fill interior black when walls form closed polygon ---
+    if (walls.length >= 3) {
+      const EPS_CLOSE = 10
+      const firstStart = walls[0].start
+      const lastEnd = walls[walls.length - 1].end
+      const isClosed = Math.abs(firstStart.x - lastEnd.x) < EPS_CLOSE && Math.abs(firstStart.y - lastEnd.y) < EPS_CLOSE
+
+      if (isClosed) {
+        ctx.fillStyle = '#000000'
+        ctx.beginPath()
+        walls.forEach((w, i) => {
+          const [sx, sy] = toScreen(w.start.x, w.start.y)
+          if (i === 0) ctx.moveTo(sx, sy)
+          else ctx.lineTo(sx, sy)
+        })
+        ctx.closePath()
+        ctx.fill()
+      }
+    }
+
+    // --- Draw sketch lines (walls as thin lines — Fusion 360 style) ---
     walls.forEach(w => {
       const [sx, sy] = toScreen(w.start.x, w.start.y)
       const [ex, ey] = toScreen(w.end.x, w.end.y)
-      const dx = ex - sx
-      const dy = ey - sy
-      const len = Math.sqrt(dx * dx + dy * dy)
-      if (len < 1) return
-      const nx = -dy / len
-      const ny = dx / len
-      const halfT = Math.max(2, (w.thickness / 2) * scale)
-
       const isSelected = w.id === selectedWallId
       const isHovered = w.id === hoverWallId
       const isEditing = w.id === editingDimWallId
       const isTrimHover = sketchTool === 'trim' && isHovered
 
-      // Wall fill — thick rectangle
-      ctx.fillStyle = isTrimHover ? '#ffcccc' : isEditing ? '#e0e8f0' : isSelected ? '#e0e8f0' : isHovered ? '#f0f0f0' : '#333333'
-      ctx.beginPath()
-      ctx.moveTo(sx + nx * halfT, sy + ny * halfT)
-      ctx.lineTo(ex + nx * halfT, ey + ny * halfT)
-      ctx.lineTo(ex - nx * halfT, ey - ny * halfT)
-      ctx.lineTo(sx - nx * halfT, sy - ny * halfT)
-      ctx.closePath()
-      ctx.fill()
-
-      // Wall outline
+      // Determine constraint state for color
+      const isConstrained = !!(w.constraint)
+      // Wall line colors on white background
       if (isTrimHover) {
         ctx.strokeStyle = '#ff0000'
-        ctx.lineWidth = 2
-      } else if (isEditing || isSelected) {
+        ctx.lineWidth = 3
+      } else if (isEditing) {
+        ctx.strokeStyle = '#0066cc'
+        ctx.lineWidth = 2.5
+      } else if (isSelected) {
         ctx.strokeStyle = '#0055aa'
-        ctx.lineWidth = 1.5
+        ctx.lineWidth = 2.5
       } else if (isHovered) {
         ctx.strokeStyle = '#3388cc'
+        ctx.lineWidth = 2
+      } else if (isConstrained) {
+        ctx.strokeStyle = '#222222'
         ctx.lineWidth = 1.5
       } else {
-        ctx.strokeStyle = '#222222'
-        ctx.lineWidth = 1
+        ctx.strokeStyle = '#555555'
+        ctx.lineWidth = 1.5
       }
+
+      ctx.beginPath()
+      ctx.moveTo(sx, sy)
+      ctx.lineTo(ex, ey)
       ctx.stroke()
 
       // Openings visualization
+      const dx = ex - sx
+      const dy = ey - sy
+      const len = Math.sqrt(dx * dx + dy * dy)
+      if (len < 1) return
       const ux = dx / len
       const uy = dy / len
+      const nx = -uy
+      const ny = ux
       const thick = w.thickness * scale
 
       w.openings.forEach(op => {
