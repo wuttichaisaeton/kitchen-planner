@@ -38,27 +38,75 @@ function autoJoinWall(wall: Wall, existingWalls: Wall[]): Wall {
 // Returns new walls array with all constraints satisfied
 // Strategy: H-constrained walls keep start.y, V-constrained walls keep start.x
 // Then propagate moved endpoints to all connected walls
+// Dimension-aware BFS propagation:
+// When a point moves, dimensioned walls TRANSLATE (keep length), undimensioned walls STRETCH.
+function propagateDimensionAware(
+  result: Wall[],
+  movedWallId: string,
+  oldPt: Point2D,
+  newPt: Point2D
+) {
+  const EPS = 5
+  const deltaX = newPt.x - oldPt.x
+  const deltaY = newPt.y - oldPt.y
+  if (Math.abs(deltaX) < 0.1 && Math.abs(deltaY) < 0.1) return
+
+  // BFS queue: { oldX, oldY, newX, newY, sourceWallId }
+  const queue: { oldX: number; oldY: number; newX: number; newY: number; sourceId: string }[] = [
+    { oldX: oldPt.x, oldY: oldPt.y, newX: newPt.x, newY: newPt.y, sourceId: movedWallId }
+  ]
+  const visited = new Set<string>()
+  visited.add(movedWallId)
+
+  while (queue.length > 0) {
+    const { oldX, oldY, newX, newY, sourceId } = queue.shift()!
+    const dx = newX - oldX
+    const dy = newY - oldY
+
+    for (const w of result) {
+      if (visited.has(w.id)) continue
+
+      // Check if this wall is connected at the moved point
+      const startMatch = Math.abs(w.start.x - oldX) < EPS && Math.abs(w.start.y - oldY) < EPS
+      const endMatch = Math.abs(w.end.x - oldX) < EPS && Math.abs(w.end.y - oldY) < EPS
+      if (!startMatch && !endMatch) continue
+
+      if (w.dimensionValue) {
+        // DIMENSIONED wall: translate the whole wall (preserve length)
+        visited.add(w.id)
+        if (startMatch) {
+          const otherOldX = w.end.x, otherOldY = w.end.y
+          w.start.x = newX; w.start.y = newY
+          w.end.x += dx; w.end.y += dy
+          // Queue propagation from the other end
+          queue.push({ oldX: otherOldX, oldY: otherOldY, newX: w.end.x, newY: w.end.y, sourceId: w.id })
+        }
+        if (endMatch) {
+          const otherOldX = w.start.x, otherOldY = w.start.y
+          w.end.x = newX; w.end.y = newY
+          w.start.x += dx; w.start.y += dy
+          queue.push({ oldX: otherOldX, oldY: otherOldY, newX: w.start.x, newY: w.start.y, sourceId: w.id })
+        }
+      } else {
+        // UNDIMENSIONED wall: only move the connected endpoint (stretch/shrink)
+        visited.add(w.id)
+        if (startMatch) {
+          w.start.x = newX; w.start.y = newY
+        }
+        if (endMatch) {
+          w.end.x = newX; w.end.y = newY
+        }
+        // Don't propagate further — this wall absorbs the change
+      }
+    }
+  }
+}
+
 function enforceAllConstraints(walls: Wall[]): Wall[] {
   const EPS = 5
   let result = walls.map(w => ({ ...w, start: { ...w.start }, end: { ...w.end } }))
 
-  // Helper: propagate a point change from oldPt to newPt across all connected walls
-  function propagatePointChange(
-    skipIdx: number, oldX: number, oldY: number, newX: number, newY: number
-  ) {
-    for (let j = 0; j < result.length; j++) {
-      if (j === skipIdx) continue
-      const other = result[j]
-      if (Math.abs(other.start.x - oldX) < EPS && Math.abs(other.start.y - oldY) < EPS) {
-        other.start.x = newX; other.start.y = newY
-      }
-      if (Math.abs(other.end.x - oldX) < EPS && Math.abs(other.end.y - oldY) < EPS) {
-        other.end.x = newX; other.end.y = newY
-      }
-    }
-  }
-
-  // Pass 1: Enforce H/V constraints + propagate
+  // Enforce H/V constraints with propagation
   for (let pass = 0; pass < 5; pass++) {
     let changed = false
 
@@ -66,83 +114,29 @@ function enforceAllConstraints(walls: Wall[]): Wall[] {
       const w = result[i]
       if (!w.constraint) continue
 
-      const oldStartX = w.start.x, oldStartY = w.start.y
       const oldEndX = w.end.x, oldEndY = w.end.y
 
-      if (w.constraint === 'H') {
-        if (Math.abs(w.start.y - w.end.y) > 0.1) {
-          w.end.y = w.start.y
-          changed = true
-        }
-      } else if (w.constraint === 'V') {
-        if (Math.abs(w.start.x - w.end.x) > 0.1) {
-          w.end.x = w.start.x
-          changed = true
-        }
-      }
-
-      if (oldStartX !== w.start.x || oldStartY !== w.start.y ||
-          oldEndX !== w.end.x || oldEndY !== w.end.y) {
-        propagatePointChange(i, oldStartX, oldStartY, w.start.x, w.start.y)
-        propagatePointChange(i, oldEndX, oldEndY, w.end.x, w.end.y)
-      }
-    }
-
-    if (!changed) break
-  }
-
-  // Pass 2: Preserve dimensioned wall lengths (respecting H/V constraints)
-  // If a dimensioned wall's length has drifted, restore it and let undimensioned walls absorb
-  for (let pass = 0; pass < 5; pass++) {
-    let changed = false
-
-    for (let i = 0; i < result.length; i++) {
-      const w = result[i]
-      if (!w.dimensionValue) continue
-
-      const dx = w.end.x - w.start.x
-      const dy = w.end.y - w.start.y
-      const curLen = Math.sqrt(dx * dx + dy * dy)
-      if (curLen < 1) continue
-      if (Math.abs(curLen - w.dimensionValue) < 1) continue // within 1mm tolerance
-
-      // Restore the dimensioned length respecting H/V constraint
-      const oldEndX = w.end.x, oldEndY = w.end.y
-      if (w.constraint === 'H') {
-        // Horizontal: only move end.x, keep end.y = start.y
-        const sign = dx >= 0 ? 1 : -1
-        w.end.x = w.start.x + sign * w.dimensionValue
-        w.end.y = w.start.y
-      } else if (w.constraint === 'V') {
-        // Vertical: only move end.y, keep end.x = start.x
-        const sign = dy >= 0 ? 1 : -1
-        w.end.x = w.start.x
-        w.end.y = w.start.y + sign * w.dimensionValue
-      } else {
-        // No H/V constraint: scale proportionally
-        const ratio = w.dimensionValue / curLen
-        w.end.x = w.start.x + dx * ratio
-        w.end.y = w.start.y + dy * ratio
-      }
-      changed = true
-
-      // Propagate end-point change to connected walls
-      propagatePointChange(i, oldEndX, oldEndY, w.end.x, w.end.y)
-    }
-
-    // Re-enforce H/V on walls that got propagated to
-    for (let i = 0; i < result.length; i++) {
-      const w = result[i]
-      if (!w.constraint) continue
       if (w.constraint === 'H' && Math.abs(w.start.y - w.end.y) > 0.1) {
-        const oldEndY = w.end.y
         w.end.y = w.start.y
-        propagatePointChange(i, w.end.x, oldEndY, w.end.x, w.end.y)
+        changed = true
       }
       if (w.constraint === 'V' && Math.abs(w.start.x - w.end.x) > 0.1) {
-        const oldEndX = w.end.x
         w.end.x = w.start.x
-        propagatePointChange(i, oldEndX, w.end.y, w.end.x, w.end.y)
+        changed = true
+      }
+
+      // Simple propagation for H/V enforcement (not dimension-aware here)
+      if (oldEndX !== w.end.x || oldEndY !== w.end.y) {
+        for (let j = 0; j < result.length; j++) {
+          if (i === j) continue
+          const other = result[j]
+          if (Math.abs(other.start.x - oldEndX) < EPS && Math.abs(other.start.y - oldEndY) < EPS) {
+            other.start.x = w.end.x; other.start.y = w.end.y
+          }
+          if (Math.abs(other.end.x - oldEndX) < EPS && Math.abs(other.end.y - oldEndY) < EPS) {
+            other.end.x = w.end.x; other.end.y = w.end.y
+          }
+        }
       }
     }
 
@@ -435,32 +429,17 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       target.constraint = 'V'
     }
 
-    // Propagate to connected walls
-    for (const other of newWalls) {
-      if (other.id === wallId) continue
-      // Connected to old start → move to new start
-      if (Math.abs(other.start.x - oldStart.x) < EPS && Math.abs(other.start.y - oldStart.y) < EPS) {
-        other.start = { ...target.start }
-      }
-      if (Math.abs(other.end.x - oldStart.x) < EPS && Math.abs(other.end.y - oldStart.y) < EPS) {
-        other.end = { ...target.start }
-      }
-      // Connected to old end → move to new end
-      if (Math.abs(other.start.x - oldEnd.x) < EPS && Math.abs(other.start.y - oldEnd.y) < EPS) {
-        other.start = { ...target.end }
-      }
-      if (Math.abs(other.end.x - oldEnd.x) < EPS && Math.abs(other.end.y - oldEnd.y) < EPS) {
-        other.end = { ...target.end }
-      }
-    }
+    // Dimension-aware BFS propagation from both endpoints
+    propagateDimensionAware(newWalls, wallId, oldEnd, target.end)
+    propagateDimensionAware(newWalls, wallId, oldStart, target.start)
 
-    // Enforce all constraints after propagation
+    // Enforce H/V constraints
     newWalls = enforceAllConstraints(newWalls)
     set({ walls: newWalls })
   },
 
   // Apply dimension atomically — resize wall + move connected walls
-  // Respects other dimensioned walls: undimensioned walls absorb changes
+  // Dimensioned walls translate (keep length), undimensioned walls absorb
   applyDimension: (wallId: string, newLength: number) => {
     get().pushHistory()
     const { walls } = get()
@@ -476,25 +455,16 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     const ratio = newLength / curLen
     const newEnd = { x: snap50(w.start.x + dx * ratio), y: snap50(w.start.y + dy * ratio) }
     const oldEnd = { ...w.end }
-    const EPS = 5
 
     let newWalls = walls.map(ww => ({ ...ww, start: { ...ww.start }, end: { ...ww.end } }))
     const target = newWalls.find(ww => ww.id === wallId)!
     target.end = newEnd
     target.dimensionValue = newLength
 
-    // Propagate to connected walls (only end side moves)
-    for (const other of newWalls) {
-      if (other.id === wallId) continue
-      if (Math.abs(other.start.x - oldEnd.x) < EPS && Math.abs(other.start.y - oldEnd.y) < EPS) {
-        other.start = { ...newEnd }
-      }
-      if (Math.abs(other.end.x - oldEnd.x) < EPS && Math.abs(other.end.y - oldEnd.y) < EPS) {
-        other.end = { ...newEnd }
-      }
-    }
+    // Dimension-aware BFS: dimensioned walls translate, undimensioned stretch
+    propagateDimensionAware(newWalls, wallId, oldEnd, newEnd)
 
-    // Enforce H/V constraints + preserve dimensioned wall lengths
+    // Enforce H/V constraints
     newWalls = enforceAllConstraints(newWalls)
     set({ walls: newWalls })
   },
