@@ -494,16 +494,26 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         }
       }
 
-      // --- Show dimension for selected/hovered wall or all walls with dimension tool ---
-      const showDim = isSelected || isEditing || sketchTool === 'dimension'
+      // --- Show dimension: only dimensioned walls + selected + dimension tool ---
+      const isDimensioned = !!w.dimensioned
+      const showDim = isDimensioned || isSelected || isEditing || sketchTool === 'dimension'
+      // Non-dimensioned walls: only show when selected or editing (not in dimension tool list)
+      const showDimLine = isDimensioned || isSelected || isEditing
       if (showDim) {
         const dimInfo = getDimScreenPos(w)
         if (dimInfo) {
           const { sx: d1x, sy: d1y, ex: d2x, ey: d2y, labelX, labelY, length } = dimInfo
           const dimFontSize = Math.max(10, Math.min(14, 12 / Math.sqrt(scale / 0.15)))
 
+          // Color scheme: dimensioned = green (like Fusion 360), selected = cyan
+          const dimColor = isDimensioned ? '#44cc44' : '#00ccff'
+          const dimColorAlpha = isDimensioned ? '#44cc4488' : '#00ccff88'
+
+          if (!showDimLine && !isSelected) {
+            // Skip dimension lines/arrows — only show clickable label for dimension tool
+          } else {
           // Dimension line
-          ctx.strokeStyle = '#00ccff88'
+          ctx.strokeStyle = dimColorAlpha
           ctx.lineWidth = 0.8
           ctx.beginPath()
           ctx.moveTo(d1x, d1y)
@@ -511,7 +521,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           ctx.stroke()
 
           // Extension lines
-          ctx.strokeStyle = '#00ccff44'
+          ctx.strokeStyle = isDimensioned ? '#44cc4444' : '#88888844'
           ctx.lineWidth = 0.5
           const extDir = d1y > sy ? 1 : -1
           ctx.beginPath()
@@ -532,7 +542,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
             const auy = ady / alen
             const arrowLen = 6
             const arrowW = 3
-            ctx.fillStyle = '#00ccff'
+            ctx.fillStyle = dimColor
             // Left arrow
             ctx.beginPath()
             ctx.moveTo(d1x, d1y)
@@ -548,30 +558,31 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
             ctx.closePath()
             ctx.fill()
           }
+          } // end showDimLine
 
-          // Dimension label (Fusion 360 style — dark bg, cyan text)
-          if (!isEditing) {
-            const label = `${length} mm`
-            ctx.font = `bold ${dimFontSize}px sans-serif`
+          // Dimension label (Fusion 360 style)
+          if (!isEditing && (isDimensioned || isSelected || sketchTool === 'dimension')) {
+            const label = `${length}`
+            ctx.font = `${isDimensioned ? 'bold' : ''} ${dimFontSize}px sans-serif`
             const metrics = ctx.measureText(label)
-            const padX = 8
-            const padY = 4
+            const padX = 6
+            const padY = 3
             const boxW = metrics.width + padX * 2
             const boxH = dimFontSize + padY * 2 + 2
-
-            // Dark box background
-            ctx.fillStyle = '#1a1a2eee'
-            ctx.strokeStyle = '#00ccff88'
-            ctx.lineWidth = 1
             const bx = labelX - boxW / 2
             const by = labelY - boxH / 2
+
+            // Box background
+            ctx.fillStyle = '#1a1a2eee'
+            ctx.strokeStyle = isDimensioned ? '#44cc4488' : '#00ccff88'
+            ctx.lineWidth = 1
             ctx.beginPath()
             ctx.roundRect(bx, by, boxW, boxH, 3)
             ctx.fill()
             ctx.stroke()
 
-            // Cyan text
-            ctx.fillStyle = '#00ccff'
+            // Label text — green if dimensioned, cyan otherwise
+            ctx.fillStyle = isDimensioned ? '#44cc44' : '#00ccff'
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
             ctx.fillText(label, labelX, labelY)
@@ -1032,33 +1043,11 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     const w = walls.find(ww => ww.id === editingDimWallId)
     if (!w) { setEditingDimWallId(null); return }
 
-    const dx = w.end.x - w.start.x
-    const dy = w.end.y - w.start.y
-    const curLen = Math.sqrt(dx * dx + dy * dy)
+    const curLen = wallLength(w)
     if (curLen < 1) { setEditingDimWallId(null); return }
 
-    const ratio = targetLen / curLen
-    const newEnd = {
-      x: snap(w.start.x + dx * ratio),
-      y: snap(w.start.y + dy * ratio),
-    }
-    useRoomStore.getState().pushHistory()
-    updateWall(w.id, { end: newEnd })
-
-    // Update connected walls that share the old endpoint
-    const EPS = 1
-    walls.forEach(other => {
-      if (other.id === w.id) return
-      if (Math.abs(other.start.x - w.end.x) < EPS && Math.abs(other.start.y - w.end.y) < EPS) {
-        updateWall(other.id, { start: { x: newEnd.x, y: newEnd.y } })
-      }
-      if (Math.abs(other.end.x - w.end.x) < EPS && Math.abs(other.end.y - w.end.y) < EPS) {
-        updateWall(other.id, { end: { x: newEnd.x, y: newEnd.y } })
-      }
-    })
-
-    // Enforce H/V constraints on all connected walls after dimension change
-    useRoomStore.getState().enforceConstraints()
+    // Atomic: resize + propagate + enforce constraints in store
+    useRoomStore.getState().applyDimension(editingDimWallId, targetLen)
 
     setEditingDimWallId(null)
   }
@@ -1179,44 +1168,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     if (sketchTool === 'hv') {
       const hit = findWallAt(mx, my)
       if (hit) {
-        const w = walls.find(ww => ww.id === hit.wallId)
-        if (w) {
-          // If already constrained, toggle off
-          if (w.constraint) {
-            useRoomStore.getState().pushHistory()
-            updateWall(w.id, { constraint: null })
-            selectWall(hit.wallId)
-            return
-          }
-          const ddx = Math.abs(w.end.x - w.start.x)
-          const ddy = Math.abs(w.end.y - w.start.y)
-          const oldEnd = { ...w.end }
-          const constraintType = ddx >= ddy ? 'H' : 'V'
-          let newEnd: Point2D
-          useRoomStore.getState().pushHistory()
-          if (ddx >= ddy) {
-            const avgY = snap((w.start.y + w.end.y) / 2)
-            newEnd = { x: w.end.x, y: avgY }
-            updateWall(w.id, { start: { x: w.start.x, y: avgY }, end: newEnd, constraint: 'H' as const })
-          } else {
-            const avgX = snap((w.start.x + w.end.x) / 2)
-            newEnd = { x: avgX, y: w.end.y }
-            updateWall(w.id, { start: { x: avgX, y: w.start.y }, end: newEnd, constraint: 'V' as const })
-          }
-          // Update connected walls
-          const EPS = 1
-          walls.forEach(other => {
-            if (other.id === w.id) return
-            if (Math.abs(other.start.x - oldEnd.x) < EPS && Math.abs(other.start.y - oldEnd.y) < EPS) {
-              updateWall(other.id, { start: { x: newEnd.x, y: newEnd.y } })
-            }
-            if (Math.abs(other.end.x - oldEnd.x) < EPS && Math.abs(other.end.y - oldEnd.y) < EPS) {
-              updateWall(other.id, { end: { x: newEnd.x, y: newEnd.y } })
-            }
-          })
-          // Enforce H/V constraints on all connected walls after H/V change
-          useRoomStore.getState().enforceConstraints()
-        }
+        useRoomStore.getState().applyHVConstraint(hit.wallId)
         selectWall(hit.wallId)
       }
       return

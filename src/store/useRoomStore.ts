@@ -125,7 +125,7 @@ interface RoomState {
   canRedo: () => boolean
   setRoomRect: (w: number, d: number) => void
   addWall: (start: Point2D, end: Point2D) => void
-  updateWall: (id: string, updates: Partial<Pick<Wall, 'start' | 'end' | 'thickness' | 'height' | 'constraint'>>) => void
+  updateWall: (id: string, updates: Partial<Pick<Wall, 'start' | 'end' | 'thickness' | 'height' | 'constraint' | 'dimensioned'>>) => void
   removeWall: (id: string) => void
   selectWall: (id: string | null) => void
   addOpening: (wallId: string, type: 'door' | 'window') => void
@@ -136,6 +136,8 @@ interface RoomState {
   removeColumn: (id: string) => void
   addGuide: (start: Point2D, end: Point2D) => void
   removeGuide: (id: string) => void
+  applyHVConstraint: (wallId: string) => void
+  applyDimension: (wallId: string, newLength: number) => void
   autoJoinAll: () => void
   enforceConstraints: () => void
   clearWalls: () => void
@@ -343,6 +345,104 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     set(s => ({
       guides: s.guides.filter(g => g.id !== id)
     }))
+  },
+
+  // Apply H/V constraint atomically — moves wall + all connected walls in one operation
+  applyHVConstraint: (wallId: string) => {
+    get().pushHistory()
+    const { walls } = get()
+    const w = walls.find(ww => ww.id === wallId)
+    if (!w) return
+
+    // If already constrained, toggle off
+    if (w.constraint) {
+      set(s => ({ walls: s.walls.map(ww => ww.id === wallId ? { ...ww, constraint: null } : ww) }))
+      return
+    }
+
+    const ddx = Math.abs(w.end.x - w.start.x)
+    const ddy = Math.abs(w.end.y - w.start.y)
+    const EPS = 5
+
+    // Compute new positions
+    let newWalls = walls.map(ww => ({ ...ww, start: { ...ww.start }, end: { ...ww.end } }))
+    const target = newWalls.find(ww => ww.id === wallId)!
+    const oldStart = { ...target.start }
+    const oldEnd = { ...target.end }
+
+    if (ddx >= ddy) {
+      // Horizontal — align Y to start.y (keep start as anchor)
+      const y = target.start.y
+      target.end.y = y
+      target.constraint = 'H'
+    } else {
+      // Vertical — align X to start.x (keep start as anchor)
+      const x = target.start.x
+      target.end.x = x
+      target.constraint = 'V'
+    }
+
+    // Propagate to connected walls
+    for (const other of newWalls) {
+      if (other.id === wallId) continue
+      // Connected to old start → move to new start
+      if (Math.abs(other.start.x - oldStart.x) < EPS && Math.abs(other.start.y - oldStart.y) < EPS) {
+        other.start = { ...target.start }
+      }
+      if (Math.abs(other.end.x - oldStart.x) < EPS && Math.abs(other.end.y - oldStart.y) < EPS) {
+        other.end = { ...target.start }
+      }
+      // Connected to old end → move to new end
+      if (Math.abs(other.start.x - oldEnd.x) < EPS && Math.abs(other.start.y - oldEnd.y) < EPS) {
+        other.start = { ...target.end }
+      }
+      if (Math.abs(other.end.x - oldEnd.x) < EPS && Math.abs(other.end.y - oldEnd.y) < EPS) {
+        other.end = { ...target.end }
+      }
+    }
+
+    // Enforce all constraints after propagation
+    newWalls = enforceAllConstraints(newWalls)
+    set({ walls: newWalls })
+  },
+
+  // Apply dimension atomically — resize wall + move connected walls
+  applyDimension: (wallId: string, newLength: number) => {
+    get().pushHistory()
+    const { walls } = get()
+    const w = walls.find(ww => ww.id === wallId)
+    if (!w) return
+
+    const dx = w.end.x - w.start.x
+    const dy = w.end.y - w.start.y
+    const curLen = Math.sqrt(dx * dx + dy * dy)
+    if (curLen < 1) return
+
+    const snap50 = (v: number) => Math.round(v / 50) * 50
+    const ratio = newLength / curLen
+    const newEnd = { x: snap50(w.start.x + dx * ratio), y: snap50(w.start.y + dy * ratio) }
+    const oldEnd = { ...w.end }
+    const EPS = 5
+
+    let newWalls = walls.map(ww => ({ ...ww, start: { ...ww.start }, end: { ...ww.end } }))
+    const target = newWalls.find(ww => ww.id === wallId)!
+    target.end = newEnd
+    target.dimensioned = true
+
+    // Propagate to connected walls (only end side moves)
+    for (const other of newWalls) {
+      if (other.id === wallId) continue
+      if (Math.abs(other.start.x - oldEnd.x) < EPS && Math.abs(other.start.y - oldEnd.y) < EPS) {
+        other.start = { ...newEnd }
+      }
+      if (Math.abs(other.end.x - oldEnd.x) < EPS && Math.abs(other.end.y - oldEnd.y) < EPS) {
+        other.end = { ...newEnd }
+      }
+    }
+
+    // Enforce all constraints
+    newWalls = enforceAllConstraints(newWalls)
+    set({ walls: newWalls })
   },
 
   // Auto-join all walls — merge any endpoints within threshold
