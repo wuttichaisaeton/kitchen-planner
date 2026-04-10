@@ -91,7 +91,7 @@ function enforceAllConstraints(walls: Wall[]): Wall[] {
     if (!changed) break
   }
 
-  // Pass 2: Preserve dimensioned wall lengths
+  // Pass 2: Preserve dimensioned wall lengths (respecting H/V constraints)
   // If a dimensioned wall's length has drifted, restore it and let undimensioned walls absorb
   for (let pass = 0; pass < 5; pass++) {
     let changed = false
@@ -106,15 +106,44 @@ function enforceAllConstraints(walls: Wall[]): Wall[] {
       if (curLen < 1) continue
       if (Math.abs(curLen - w.dimensionValue) < 1) continue // within 1mm tolerance
 
-      // Restore the dimensioned length by adjusting end point
-      const ratio = w.dimensionValue / curLen
+      // Restore the dimensioned length respecting H/V constraint
       const oldEndX = w.end.x, oldEndY = w.end.y
-      w.end.x = w.start.x + dx * ratio
-      w.end.y = w.start.y + dy * ratio
+      if (w.constraint === 'H') {
+        // Horizontal: only move end.x, keep end.y = start.y
+        const sign = dx >= 0 ? 1 : -1
+        w.end.x = w.start.x + sign * w.dimensionValue
+        w.end.y = w.start.y
+      } else if (w.constraint === 'V') {
+        // Vertical: only move end.y, keep end.x = start.x
+        const sign = dy >= 0 ? 1 : -1
+        w.end.x = w.start.x
+        w.end.y = w.start.y + sign * w.dimensionValue
+      } else {
+        // No H/V constraint: scale proportionally
+        const ratio = w.dimensionValue / curLen
+        w.end.x = w.start.x + dx * ratio
+        w.end.y = w.start.y + dy * ratio
+      }
       changed = true
 
       // Propagate end-point change to connected walls
       propagatePointChange(i, oldEndX, oldEndY, w.end.x, w.end.y)
+    }
+
+    // Re-enforce H/V on walls that got propagated to
+    for (let i = 0; i < result.length; i++) {
+      const w = result[i]
+      if (!w.constraint) continue
+      if (w.constraint === 'H' && Math.abs(w.start.y - w.end.y) > 0.1) {
+        const oldEndY = w.end.y
+        w.end.y = w.start.y
+        propagatePointChange(i, w.end.x, oldEndY, w.end.x, w.end.y)
+      }
+      if (w.constraint === 'V' && Math.abs(w.start.x - w.end.x) > 0.1) {
+        const oldEndX = w.end.x
+        w.end.x = w.start.x
+        propagatePointChange(i, oldEndX, w.end.y, w.end.x, w.end.y)
+      }
     }
 
     if (!changed) break
