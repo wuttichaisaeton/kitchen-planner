@@ -6,6 +6,7 @@ import { catalogItems } from '../../data/catalogItems'
 import { Wall, Point2D } from '../../types/kitchen'
 import type { UseLeicaDistoReturn } from '../../hooks/useLeicaDisto'
 import ContextMenu from './ContextMenu'
+import OpeningDialog from './OpeningDialog'
 
 const GRID_SIZE = 100
 const SNAP = 50
@@ -88,8 +89,6 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
   // Right-click context menu
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
 
-  // Two-click door/window drawing state
-  const [openingDraw, setOpeningDraw] = useState<{ wallId: string; offsetMM: number } | null>(null)
 
   // Dimension input ref for iPad focus
   const dimInputRef = useRef<HTMLInputElement>(null)
@@ -203,7 +202,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         setConstraintFirstWallId(null)
         setCoincidentFirst(null)
         setSelectedConstraintWallId(null)
-        setOpeningDraw(null)
+
         setContextMenu(null)
         setSketchTool('select')
         return
@@ -873,59 +872,70 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       ctx.setLineDash([])
     }
 
-    // --- Door/Window draw preview (two-click) ---
-    if (openingDraw && (sketchTool === 'door' || sketchTool === 'window')) {
-      const w = walls.find(ww => ww.id === openingDraw.wallId)
-      if (w) {
-        const [wsx, wsy] = toScreen(w.start.x, w.start.y)
-        const [wex, wey] = toScreen(w.end.x, w.end.y)
-        const wdx = wex - wsx, wdy = wey - wsy
-        const wlen = Math.sqrt(wdx * wdx + wdy * wdy)
-        const wLen = wallLength(w)
-        if (wlen > 1 && wLen > 1) {
-          const wnx = -wdy / wlen, wny = wdx / wlen
-          const halfT = Math.max(3, (w.thickness / 2) * scale)
+    // --- Door/Window placement preview (ghost following mouse on wall) ---
+    if ((sketchTool === 'door' || sketchTool === 'window') && !useUIStore.getState().showOpeningDialog) {
+      const preset = useUIStore.getState().openingPreset
+      if (preset) {
+        // Find nearest wall to mouse
+        const hitPreview = findWallAt(
+          mouseWorld.x * scale + panX,
+          mouseWorld.y * scale + panY
+        )
+        if (hitPreview) {
+          const w = walls.find(ww => ww.id === hitPreview.wallId)
+          if (w) {
+            const [wsx, wsy] = toScreen(w.start.x, w.start.y)
+            const [wex, wey] = toScreen(w.end.x, w.end.y)
+            const wdx = wex - wsx, wdy = wey - wsy
+            const wlen = Math.sqrt(wdx * wdx + wdy * wdy)
+            const wLen = wallLength(w)
+            if (wlen > 1 && wLen > 1) {
+              const wnx = -wdy / wlen, wny = wdx / wlen
+              const halfT = Math.max(3, (w.thickness / 2) * scale)
 
-          // First click marker
-          const t1 = openingDraw.offsetMM / wLen
-          const p1x = wsx + wdx * t1, p1y = wsy + wdy * t1
-          ctx.fillStyle = sketchTool === 'door' ? '#8B4513' : '#0066cc'
-          ctx.beginPath()
-          ctx.arc(p1x, p1y, 4, 0, Math.PI * 2)
-          ctx.fill()
+              // Project mouse onto wall
+              const mwdx = w.end.x - w.start.x, mwdy = w.end.y - w.start.y
+              const mt = ((mouseWorld.x - w.start.x) * mwdx + (mouseWorld.y - w.start.y) * mwdy) / (mwdx * mwdx + mwdy * mwdy)
+              let offset = Math.max(0, Math.min(1, mt)) * wLen - preset.width / 2
+              offset = Math.max(0, Math.min(wLen - preset.width, offset))
+              offset = Math.round(offset / 50) * 50
 
-          // Preview line to mouse position (projected onto wall)
-          const mwdx = w.end.x - w.start.x, mwdy = w.end.y - w.start.y
-          const mt = ((mouseWorld.x - w.start.x) * mwdx + (mouseWorld.y - w.start.y) * mwdy) / (mwdx * mwdx + mwdy * mwdy)
-          const clampT = Math.max(0, Math.min(1, mt))
-          const t2 = clampT
-          const p2x = wsx + wdx * t2, p2y = wsy + wdy * t2
+              const t1 = offset / wLen
+              const t2 = (offset + preset.width) / wLen
+              const p1x = wsx + wdx * t1, p1y = wsy + wdy * t1
+              const p2x = wsx + wdx * t2, p2y = wsy + wdy * t2
 
-          // Preview rectangle (dashed)
-          ctx.strokeStyle = sketchTool === 'door' ? '#8B4513' : '#0066cc'
-          ctx.lineWidth = 1.5
-          ctx.setLineDash([4, 4])
-          ctx.beginPath()
-          ctx.moveTo(p1x + wnx * halfT, p1y + wny * halfT)
-          ctx.lineTo(p2x + wnx * halfT, p2y + wny * halfT)
-          ctx.lineTo(p2x - wnx * halfT, p2y - wny * halfT)
-          ctx.lineTo(p1x - wnx * halfT, p1y - wny * halfT)
-          ctx.closePath()
-          ctx.stroke()
-          ctx.setLineDash([])
+              // Ghost rectangle (dashed)
+              ctx.strokeStyle = sketchTool === 'door' ? '#8B4513' : '#0066cc'
+              ctx.lineWidth = 1.5
+              ctx.setLineDash([4, 4])
+              ctx.fillStyle = sketchTool === 'door' ? 'rgba(139,69,19,0.08)' : 'rgba(0,102,204,0.08)'
+              ctx.beginPath()
+              ctx.moveTo(p1x + wnx * halfT, p1y + wny * halfT)
+              ctx.lineTo(p2x + wnx * halfT, p2y + wny * halfT)
+              ctx.lineTo(p2x - wnx * halfT, p2y - wny * halfT)
+              ctx.lineTo(p1x - wnx * halfT, p1y - wny * halfT)
+              ctx.closePath()
+              ctx.fill()
+              ctx.stroke()
+              ctx.setLineDash([])
 
-          // Preview width label
-          const previewW = Math.abs(clampT * wLen - openingDraw.offsetMM)
-          const pmx = (p1x + p2x) / 2, pmy = (p1y + p2y) / 2
-          ctx.font = 'bold 11px sans-serif'
-          ctx.textAlign = 'center'
-          ctx.textBaseline = 'middle'
-          const pwLabel = `${Math.round(previewW / 50) * 50}`
-          const ptw = ctx.measureText(pwLabel).width
-          ctx.fillStyle = '#ffffffcc'
-          ctx.fillRect(pmx - ptw / 2 - 3, pmy - wnx * halfT - 20, ptw + 6, 16)
-          ctx.fillStyle = sketchTool === 'door' ? '#8B4513' : '#0066cc'
-          ctx.fillText(pwLabel, pmx, pmy - wnx * halfT - 12)
+              // Width label
+              const pmx = (p1x + p2x) / 2, pmy = (p1y + p2y) / 2
+              const labelOff = halfT + 12
+              ctx.font = 'bold 10px sans-serif'
+              ctx.textAlign = 'center'
+              ctx.textBaseline = 'middle'
+              const pwLabel = `${preset.width}`
+              const ptw = ctx.measureText(pwLabel).width
+              const lbx = pmx - wnx * labelOff
+              const lby = pmy - wny * labelOff
+              ctx.fillStyle = '#ffffffcc'
+              ctx.fillRect(lbx - ptw / 2 - 3, lby - 7, ptw + 6, 14)
+              ctx.fillStyle = sketchTool === 'door' ? '#8B4513' : '#0066cc'
+              ctx.fillText(pwLabel, lbx, lby)
+            }
+          }
         }
       }
     }
@@ -1472,6 +1482,13 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     }
 
     if (sketchTool === 'door' || sketchTool === 'window') {
+      // If dialog is still open, ignore clicks on canvas
+      const showDialog = useUIStore.getState().showOpeningDialog
+      if (showDialog) return
+
+      const preset = useUIStore.getState().openingPreset
+      if (!preset) return
+
       const hit = findWallAt(mx, my)
       if (!hit) return
       const w = walls.find(ww => ww.id === hit.wallId)
@@ -1479,21 +1496,24 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       const wLen = wallLength(w)
       const clickOffset = (hit.t ?? 0.5) * wLen
 
-      if (!openingDraw) {
-        // First click — set start point
-        setOpeningDraw({ wallId: hit.wallId, offsetMM: Math.round(clickOffset / 50) * 50 })
-        selectWall(hit.wallId)
-      } else {
-        // Second click — create opening from first to second click
-        if (openingDraw.wallId === hit.wallId) {
-          const endOffset = Math.round(clickOffset / 50) * 50
-          const startOff = Math.min(openingDraw.offsetMM, endOffset)
-          const endOff = Math.max(openingDraw.offsetMM, endOffset)
-          const width = Math.max(100, endOff - startOff) // minimum 100mm
-          addOpening(hit.wallId, sketchTool, startOff, width)
+      // Place with preset size, centered on click
+      const offset = clickOffset - preset.width / 2
+      addOpening(hit.wallId, sketchTool, offset, preset.width)
+
+      // Apply preset properties to the just-added opening
+      const updatedWall = useRoomStore.getState().walls.find(ww => ww.id === hit.wallId)
+      if (updatedWall) {
+        const lastOpening = updatedWall.openings[updatedWall.openings.length - 1]
+        if (lastOpening) {
+          useRoomStore.getState().updateOpeningNoHistory(hit.wallId, lastOpening.id, {
+            height: preset.height,
+            sillHeight: preset.sillHeight,
+            hingePosition: preset.hingePosition,
+            swingSide: preset.swingSide,
+          })
         }
-        setOpeningDraw(null)
       }
+      selectWall(hit.wallId)
       return
     }
 
@@ -1995,12 +2015,45 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         )
       })()}
 
+      {/* Opening preset dialog */}
+      <OpeningDialog />
+
       {/* Right-click context menu */}
       {contextMenu && (
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
           onClose={() => setContextMenu(null)}
+          onZoomIn={() => {
+            const canvas = canvasRef.current
+            if (!canvas) return
+            const cx = canvas.clientWidth / 2, cy = canvas.clientHeight / 2
+            const ns = Math.max(0.02, Math.min(2, scale * 1.3))
+            const wx = (cx - panX) / scale, wy = (cy - panY) / scale
+            setPanX(cx - wx * ns); setPanY(cy - wy * ns); setScale(ns)
+          }}
+          onZoomOut={() => {
+            const canvas = canvasRef.current
+            if (!canvas) return
+            const cx = canvas.clientWidth / 2, cy = canvas.clientHeight / 2
+            const ns = Math.max(0.02, Math.min(2, scale * 0.7))
+            const wx = (cx - panX) / scale, wy = (cy - panY) / scale
+            setPanX(cx - wx * ns); setPanY(cy - wy * ns); setScale(ns)
+          }}
+          onZoomFit={() => {
+            if (walls.length === 0) return
+            const canvas = canvasRef.current
+            if (!canvas) return
+            const cw = canvas.clientWidth, ch = canvas.clientHeight
+            let mnX = Infinity, mnY = Infinity, mxX = -Infinity, mxY = -Infinity
+            for (const w of walls) {
+              mnX = Math.min(mnX, w.start.x, w.end.x); mnY = Math.min(mnY, w.start.y, w.end.y)
+              mxX = Math.max(mxX, w.start.x, w.end.x); mxY = Math.max(mxY, w.start.y, w.end.y)
+            }
+            const pad = 80, ww = mxX - mnX || 1000, hh = mxY - mnY || 1000
+            const ns = Math.max(0.02, Math.min(2, Math.min((cw - pad * 2) / ww, (ch - pad * 2) / hh)))
+            setPanX(cw / 2 - (mnX + mxX) / 2 * ns); setPanY(ch / 2 - (mnY + mxY) / 2 * ns); setScale(ns)
+          }}
         />
       )}
     </div>

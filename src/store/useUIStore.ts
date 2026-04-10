@@ -6,6 +6,15 @@ type SidePanel = 'catalog' | 'properties' | 'quotation'
 type LeftTab = 'catalog' | 'walls'
 export type SketchTool = 'select' | 'line' | 'rectangle' | 'dimension' | 'door' | 'window' | 'column' | 'trim' | 'construction' | 'offset' | 'fillet' | 'mirror' | 'hv' | 'perpendicular' | 'fix' | 'equal' | 'parallel' | 'coincident' | 'symmetric'
 
+export interface OpeningPreset {
+  type: 'door' | 'window'
+  width: number       // mm
+  height: number      // mm
+  sillHeight: number   // mm (window only)
+  hingePosition: 'start' | 'end'
+  swingSide: 'inside' | 'outside'
+}
+
 const DEFAULT_FAVORITES: SketchTool[] = ['select', 'line', 'rectangle', 'door', 'window', 'dimension', 'trim']
 
 function loadFavorites(): SketchTool[] {
@@ -31,6 +40,8 @@ interface UIState {
   sketchTool: SketchTool
   lastSketchTool: SketchTool
   favoriteTools: SketchTool[]
+  openingPreset: OpeningPreset | null
+  showOpeningDialog: boolean
   setViewMode: (m: ViewMode) => void
   setActiveTool: (t: ActiveTool) => void
   setSidePanel: (p: SidePanel) => void
@@ -40,6 +51,9 @@ interface UIState {
   setLeftTab: (t: LeftTab) => void
   setSketchTool: (t: SketchTool) => void
   toggleFavoriteTool: (t: SketchTool) => void
+  setOpeningPreset: (p: OpeningPreset | null) => void
+  setShowOpeningDialog: (v: boolean) => void
+  confirmOpeningPreset: (p: OpeningPreset) => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -53,6 +67,8 @@ export const useUIStore = create<UIState>((set) => ({
   sketchTool: 'line',
   lastSketchTool: 'line',
   favoriteTools: loadFavorites(),
+  openingPreset: null,
+  showOpeningDialog: false,
   setViewMode: (viewMode) => set({ viewMode }),
   setActiveTool: (activeTool) => set({ activeTool }),
   setSidePanel: (sidePanel) => set({ sidePanel }),
@@ -60,7 +76,28 @@ export const useUIStore = create<UIState>((set) => ({
   toggleLeft: () => set(s => ({ leftOpen: !s.leftOpen })),
   toggleRight: () => set(s => ({ rightOpen: !s.rightOpen })),
   setLeftTab: (leftTab) => set({ leftTab, leftOpen: true }),
-  setSketchTool: (sketchTool) => set(s => ({ sketchTool, lastSketchTool: s.sketchTool !== 'select' ? s.sketchTool : s.lastSketchTool })),
+  setSketchTool: (sketchTool) => set(s => {
+    // When selecting door/window tool, show dialog first
+    if (sketchTool === 'door' || sketchTool === 'window') {
+      return {
+        sketchTool,
+        lastSketchTool: s.sketchTool !== 'select' ? s.sketchTool : s.lastSketchTool,
+        showOpeningDialog: true,
+        openingPreset: s.openingPreset?.type === sketchTool ? s.openingPreset : {
+          type: sketchTool,
+          width: sketchTool === 'door' ? 900 : 1200,
+          height: sketchTool === 'door' ? 2100 : 1200,
+          sillHeight: sketchTool === 'door' ? 0 : 900,
+          hingePosition: 'start',
+          swingSide: 'inside',
+        },
+      }
+    }
+    return { sketchTool, lastSketchTool: s.sketchTool !== 'select' ? s.sketchTool : s.lastSketchTool }
+  }),
+  setOpeningPreset: (openingPreset) => set({ openingPreset }),
+  setShowOpeningDialog: (showOpeningDialog) => set({ showOpeningDialog }),
+  confirmOpeningPreset: (preset) => set({ openingPreset: preset, showOpeningDialog: false }),
   toggleFavoriteTool: (tool) => set(s => {
     const favs = s.favoriteTools.includes(tool)
       ? s.favoriteTools.filter(t => t !== tool)

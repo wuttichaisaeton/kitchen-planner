@@ -28,9 +28,12 @@ interface ContextMenuProps {
   x: number
   y: number
   onClose: () => void
+  onZoomIn?: () => void
+  onZoomOut?: () => void
+  onZoomFit?: () => void
 }
 
-export default function ContextMenu({ x, y, onClose }: ContextMenuProps) {
+export default function ContextMenu({ x, y, onClose, onZoomIn, onZoomOut, onZoomFit }: ContextMenuProps) {
   const [customizing, setCustomizing] = useState(false)
   const favoriteTools = useUIStore(s => s.favoriteTools)
   const toggleFavoriteTool = useUIStore(s => s.toggleFavoriteTool)
@@ -138,6 +141,39 @@ export default function ContextMenu({ x, y, onClose }: ContextMenuProps) {
             <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded font-mono">{tool.shortcut}</span>
           </button>
         ))}
+      </div>
+      {/* Zoom section */}
+      <div className="border-t border-gray-200 py-1">
+        <div className="px-3 py-1 text-[9px] text-gray-400 uppercase tracking-wider font-medium">View</div>
+        <button
+          onClick={() => { onZoomFit?.(); onClose() }}
+          className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-gray-100 text-gray-700 transition-colors"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+          </svg>
+          <span className="text-sm flex-1 text-left">Zoom Fit</span>
+        </button>
+        <button
+          onClick={() => { onZoomIn?.(); onClose() }}
+          className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-gray-100 text-gray-700 transition-colors"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="11" y1="8" x2="11" y2="14" /><line x1="8" y1="11" x2="14" y2="11" />
+          </svg>
+          <span className="text-sm flex-1 text-left">Zoom In</span>
+          <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded font-mono">+</span>
+        </button>
+        <button
+          onClick={() => { onZoomOut?.(); onClose() }}
+          className="w-full flex items-center gap-2.5 px-3 py-1.5 hover:bg-gray-100 text-gray-700 transition-colors"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /><line x1="8" y1="11" x2="14" y2="11" />
+          </svg>
+          <span className="text-sm flex-1 text-left">Zoom Out</span>
+          <span className="text-[10px] text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded font-mono">−</span>
+        </button>
       </div>
       <div className="border-t border-gray-200">
         <button
