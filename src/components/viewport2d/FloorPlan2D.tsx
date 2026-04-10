@@ -320,43 +320,23 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     ctx.strokeStyle = '#44ff4466'
     ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(W, oy); ctx.stroke()
 
-    // --- Fill wall thickness (black fill when walls form closed polygon) ---
+    // --- Fill interior black when walls form closed polygon ---
     if (walls.length >= 3) {
-      // Check if walls form a closed loop by checking endpoint connections
       const EPS_CLOSE = 10
-      let isClosed = false
-      // Simple check: first wall's start connects to last wall's end (or vice versa)
       const firstStart = walls[0].start
       const lastEnd = walls[walls.length - 1].end
-      if (Math.abs(firstStart.x - lastEnd.x) < EPS_CLOSE && Math.abs(firstStart.y - lastEnd.y) < EPS_CLOSE) {
-        isClosed = true
-      }
+      const isClosed = Math.abs(firstStart.x - lastEnd.x) < EPS_CLOSE && Math.abs(firstStart.y - lastEnd.y) < EPS_CLOSE
 
       if (isClosed) {
-        // Draw each wall as a filled rectangle (thickness)
-        walls.forEach(w => {
+        ctx.fillStyle = '#000000'
+        ctx.beginPath()
+        walls.forEach((w, i) => {
           const [sx, sy] = toScreen(w.start.x, w.start.y)
-          const [ex, ey] = toScreen(w.end.x, w.end.y)
-          const dx = ex - sx
-          const dy = ey - sy
-          const len = Math.sqrt(dx * dx + dy * dy)
-          if (len < 1) return
-          const ux = dx / len
-          const uy = dy / len
-          const nx = -uy
-          const ny = ux
-          const halfT = (w.thickness / 2) * scale
-
-          // Wall filled rectangle
-          ctx.fillStyle = '#111111'
-          ctx.beginPath()
-          ctx.moveTo(sx + nx * halfT, sy + ny * halfT)
-          ctx.lineTo(ex + nx * halfT, ey + ny * halfT)
-          ctx.lineTo(ex - nx * halfT, ey - ny * halfT)
-          ctx.lineTo(sx - nx * halfT, sy - ny * halfT)
-          ctx.closePath()
-          ctx.fill()
+          if (i === 0) ctx.moveTo(sx, sy)
+          else ctx.lineTo(sx, sy)
         })
+        ctx.closePath()
+        ctx.fill()
       }
     }
 
