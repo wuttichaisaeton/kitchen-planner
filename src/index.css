@@ -1,4 +1,6 @@
 @import "tailwindcss";
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
-html, body, #root { width: 100%; height: 100%; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #0f0f1a; color: #e0e0e0; }
+html, body, #root { width: 100%; height: 100dvh; overflow: hidden; font-family: 'Segoe UI', sans-serif; background: #0f0f1a; color: #e0e0e0; overscroll-behavior: none; }
+html { position: fixed; inset: 0; }
+body { position: fixed; inset: 0; touch-action: manipulation; }

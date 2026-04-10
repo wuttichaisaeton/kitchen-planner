@@ -2,15 +2,130 @@ import { create } from 'zustand'
 import { Wall, Point2D, Opening, Column, GuideLine } from '../types/kitchen'
 import { v4 as uuid } from 'uuid'
 
+// Auto-join threshold in mm (world space — zoom independent)
+// Auto-join within 10mm
+const JOIN_THRESHOLD = 10
+
+// Find nearest existing endpoint within threshold
+function findNearestEndpoint(pt: Point2D, walls: Wall[], excludeId?: string): Point2D | null {
+  let bestDist = JOIN_THRESHOLD
+  let bestPt: Point2D | null = null
+  for (const w of walls) {
+    if (w.id === excludeId) continue
+    for (const ep of [w.start, w.end]) {
+      const d = Math.sqrt((pt.x - ep.x) ** 2 + (pt.y - ep.y) ** 2)
+      if (d < bestDist) {
+        bestDist = d
+        bestPt = { x: ep.x, y: ep.y }
+      }
+    }
+  }
+  return bestPt
+}
+
+// Auto-join: snap wall endpoints to nearby existing endpoints
+function autoJoinWall(wall: Wall, existingWalls: Wall[]): Wall {
+  const startSnap = findNearestEndpoint(wall.start, existingWalls, wall.id)
+  const endSnap = findNearestEndpoint(wall.end, existingWalls, wall.id)
+  return {
+    ...wall,
+    start: startSnap || wall.start,
+    end: endSnap || wall.end,
+  }
+}
+
+// Enforce H/V constraints on all walls, cascading through connected endpoints
+// Returns new walls array with all constraints satisfied
+// Strategy: H-constrained walls keep start.y, V-constrained walls keep start.x
+// Then propagate moved endpoints to all connected walls
+function enforceAllConstraints(walls: Wall[]): Wall[] {
+  const EPS = 5
+  let result = walls.map(w => ({ ...w, start: { ...w.start }, end: { ...w.end } }))
+
+  // Multiple passes to cascade changes through connections
+  for (let pass = 0; pass < 5; pass++) {
+    let changed = false
+
+    for (let i = 0; i < result.length; i++) {
+      const w = result[i]
+      if (!w.constraint) continue
+
+      // Save old positions for propagation
+      const oldStartX = w.start.x, oldStartY = w.start.y
+      const oldEndX = w.end.x, oldEndY = w.end.y
+
+      if (w.constraint === 'H') {
+        // Horizontal: both endpoints must have same Y
+        if (Math.abs(w.start.y - w.end.y) > 0.1) {
+          // Use start.y as the reference (it was set when constraint was applied)
+          w.end.y = w.start.y
+          changed = true
+        }
+      } else if (w.constraint === 'V') {
+        // Vertical: both endpoints must have same X
+        if (Math.abs(w.start.x - w.end.x) > 0.1) {
+          // Use start.x as the reference
+          w.end.x = w.start.x
+          changed = true
+        }
+      }
+
+      // Propagate endpoint changes to connected walls (use result positions, not original)
+      if (oldStartX !== w.start.x || oldStartY !== w.start.y ||
+          oldEndX !== w.end.x || oldEndY !== w.end.y) {
+        for (let j = 0; j < result.length; j++) {
+          if (i === j) continue
+          const other = result[j]
+          // If other's start was connected to this wall's start (old position)
+          if (Math.abs(other.start.x - oldStartX) < EPS && Math.abs(other.start.y - oldStartY) < EPS) {
+            other.start.x = w.start.x; other.start.y = w.start.y
+          }
+          // If other's start was connected to this wall's end (old position)
+          if (Math.abs(other.start.x - oldEndX) < EPS && Math.abs(other.start.y - oldEndY) < EPS) {
+            other.start.x = w.end.x; other.start.y = w.end.y
+          }
+          // If other's end was connected to this wall's start (old position)
+          if (Math.abs(other.end.x - oldStartX) < EPS && Math.abs(other.end.y - oldStartY) < EPS) {
+            other.end.x = w.start.x; other.end.y = w.start.y
+          }
+          // If other's end was connected to this wall's end (old position)
+          if (Math.abs(other.end.x - oldEndX) < EPS && Math.abs(other.end.y - oldEndY) < EPS) {
+            other.end.x = w.end.x; other.end.y = w.end.y
+          }
+        }
+      }
+    }
+
+    if (!changed) break
+  }
+
+  return result
+}
+
+interface HistoryEntry {
+  walls: Wall[]
+  columns: Column[]
+  guides: GuideLine[]
+}
+
+const MAX_HISTORY = 50
+
 interface RoomState {
   walls: Wall[]
   columns: Column[]
   guides: GuideLine[]
   ceilingHeight: number
   selectedWallId: string | null
+  _history: HistoryEntry[]
+  _historyIndex: number
+  pushHistory: () => void
+  undo: () => void
+  redo: () => void
+  canUndo: () => boolean
+  canRedo: () => boolean
   setRoomRect: (w: number, d: number) => void
   addWall: (start: Point2D, end: Point2D) => void
-  updateWall: (id: string, updates: Partial<Pick<Wall, 'start' | 'end' | 'thickness' | 'height'>>) => void
+  updateWall: (id: string, updates: Partial<Pick<Wall, 'start' | 'end' | 'thickness' | 'height' | 'constraint'>>) => void
   removeWall: (id: string) => void
   selectWall: (id: string | null) => void
   addOpening: (wallId: string, type: 'door' | 'window') => void
@@ -21,17 +136,94 @@ interface RoomState {
   removeColumn: (id: string) => void
   addGuide: (start: Point2D, end: Point2D) => void
   removeGuide: (id: string) => void
+  autoJoinAll: () => void
+  enforceConstraints: () => void
   clearWalls: () => void
 }
 
-export const useRoomStore = create<RoomState>((set) => ({
+export const useRoomStore = create<RoomState>((set, get) => ({
   walls: [],
   columns: [],
   guides: [],
   ceilingHeight: 2700,
   selectedWallId: null,
+  _history: [],
+  _historyIndex: -1,
+
+  // Save current state to history BEFORE making a change
+  // Call this manually at the START of meaningful operations (not during drag)
+  pushHistory: () => {
+    const { walls, columns, guides, _history, _historyIndex } = get()
+    const entry: HistoryEntry = {
+      walls: JSON.parse(JSON.stringify(walls)),
+      columns: JSON.parse(JSON.stringify(columns)),
+      guides: JSON.parse(JSON.stringify(guides)),
+    }
+    // Truncate any future history (redo stack) when new action happens
+    const newHistory = _history.slice(0, _historyIndex + 1)
+    newHistory.push(entry)
+    if (newHistory.length > MAX_HISTORY) newHistory.shift()
+    set({ _history: newHistory, _historyIndex: newHistory.length - 1 })
+  },
+
+  undo: () => {
+    const { _history, _historyIndex } = get()
+    if (_historyIndex < 0) return
+    // Save current state so redo can restore it
+    const { walls, columns, guides } = get()
+    const currentEntry: HistoryEntry = {
+      walls: JSON.parse(JSON.stringify(walls)),
+      columns: JSON.parse(JSON.stringify(columns)),
+      guides: JSON.parse(JSON.stringify(guides)),
+    }
+    // Put current state at _historyIndex + 1 for redo
+    const newHistory = [..._history]
+    // If there's no "future" entry yet, add one
+    if (_historyIndex + 1 >= newHistory.length) {
+      newHistory.push(currentEntry)
+    } else {
+      newHistory[_historyIndex + 1] = currentEntry
+    }
+
+    const entry = _history[_historyIndex]
+    set({
+      walls: JSON.parse(JSON.stringify(entry.walls)),
+      columns: JSON.parse(JSON.stringify(entry.columns)),
+      guides: JSON.parse(JSON.stringify(entry.guides)),
+      _history: newHistory,
+      _historyIndex: _historyIndex - 1,
+    })
+  },
+
+  redo: () => {
+    const { _history, _historyIndex } = get()
+    const redoIndex = _historyIndex + 2
+    if (redoIndex >= _history.length) return
+    // Save current state back
+    const { walls, columns, guides } = get()
+    const currentEntry: HistoryEntry = {
+      walls: JSON.parse(JSON.stringify(walls)),
+      columns: JSON.parse(JSON.stringify(columns)),
+      guides: JSON.parse(JSON.stringify(guides)),
+    }
+    const newHistory = [..._history]
+    newHistory[_historyIndex + 1] = currentEntry
+
+    const entry = _history[redoIndex]
+    set({
+      walls: JSON.parse(JSON.stringify(entry.walls)),
+      columns: JSON.parse(JSON.stringify(entry.columns)),
+      guides: JSON.parse(JSON.stringify(entry.guides)),
+      _history: newHistory,
+      _historyIndex: _historyIndex + 1,
+    })
+  },
+
+  canUndo: () => get()._historyIndex >= 0,
+  canRedo: () => get()._historyIndex + 2 < get()._history.length,
 
   setRoomRect: (w, d) => {
+    get().pushHistory()
     const walls: Wall[] = [
       { id: uuid(), start: { x: 0, y: 0 }, end: { x: w, y: 0 }, thickness: 150, height: 2700, openings: [], label: 'Back Wall' },
       { id: uuid(), start: { x: w, y: 0 }, end: { x: w, y: d }, thickness: 150, height: 2700, openings: [], label: 'Right Wall' },
@@ -41,81 +233,151 @@ export const useRoomStore = create<RoomState>((set) => ({
     set({ walls })
   },
 
-  addWall: (start, end) => set(s => ({
-    walls: [...s.walls, { id: uuid(), start, end, thickness: 150, height: 2700, openings: [], label: `Wall ${s.walls.length + 1}` }]
-  })),
+  addWall: (start, end) => {
+    get().pushHistory()
+    set(s => {
+      const newWall: Wall = { id: uuid(), start, end, thickness: 150, height: 2700, openings: [], label: `Wall ${s.walls.length + 1}` }
+      // Auto-join: snap endpoints to nearby existing wall endpoints
+      const joined = autoJoinWall(newWall, s.walls)
+      return { walls: [...s.walls, joined] }
+    })
+  },
 
-  updateWall: (id, updates) => set(s => ({
-    walls: s.walls.map(w => w.id === id ? { ...w, ...updates } : w)
-  })),
+  // NO history push here — caller must call pushHistory() before drag starts
+  updateWall: (id, updates) => {
+    set(s => ({
+      walls: s.walls.map(w => w.id === id ? { ...w, ...updates } : w)
+    }))
+  },
 
-  removeWall: (id) => set(s => ({
-    walls: s.walls.filter(w => w.id !== id),
-    selectedWallId: s.selectedWallId === id ? null : s.selectedWallId,
-  })),
+  removeWall: (id) => {
+    get().pushHistory()
+    set(s => ({
+      walls: s.walls.filter(w => w.id !== id),
+      selectedWallId: s.selectedWallId === id ? null : s.selectedWallId,
+    }))
+  },
 
   selectWall: (id) => set({ selectedWallId: id }),
 
-  addOpening: (wallId, type) => set(s => {
-    const wall = s.walls.find(w => w.id === wallId)
-    if (!wall) return s
-    const dx = wall.end.x - wall.start.x
-    const dy = wall.end.y - wall.start.y
-    const wallLen = Math.sqrt(dx * dx + dy * dy)
+  addOpening: (wallId, type) => {
+    get().pushHistory()
+    set(s => {
+      const wall = s.walls.find(w => w.id === wallId)
+      if (!wall) return s
+      const dx = wall.end.x - wall.start.x
+      const dy = wall.end.y - wall.start.y
+      const wallLen = Math.sqrt(dx * dx + dy * dy)
 
-    const opening: Opening = {
-      id: uuid(),
-      type,
-      offsetFromStart: Math.max(200, (wallLen - (type === 'door' ? 900 : 1200)) / 2),
-      width: type === 'door' ? 900 : 1200,
-      height: type === 'door' ? 2100 : 1200,
-      sillHeight: type === 'door' ? 0 : 900,
+      const opening: Opening = {
+        id: uuid(),
+        type,
+        offsetFromStart: Math.max(200, (wallLen - (type === 'door' ? 900 : 1200)) / 2),
+        width: type === 'door' ? 900 : 1200,
+        height: type === 'door' ? 2100 : 1200,
+        sillHeight: type === 'door' ? 0 : 900,
+      }
+      return {
+        walls: s.walls.map(w => w.id === wallId ? { ...w, openings: [...w.openings, opening] } : w)
+      }
+    })
+  },
+
+  updateOpening: (wallId, openingId, updates) => {
+    get().pushHistory()
+    set(s => ({
+      walls: s.walls.map(w => w.id === wallId ? {
+        ...w,
+        openings: w.openings.map(o => o.id === openingId ? { ...o, ...updates } : o)
+      } : w)
+    }))
+  },
+
+  removeOpening: (wallId, openingId) => {
+    get().pushHistory()
+    set(s => ({
+      walls: s.walls.map(w => w.id === wallId ? {
+        ...w,
+        openings: w.openings.filter(o => o.id !== openingId)
+      } : w)
+    }))
+  },
+
+  addColumn: (position) => {
+    get().pushHistory()
+    set(s => ({
+      columns: [...s.columns, {
+        id: uuid(),
+        position,
+        width: 300,
+        depth: 300,
+        height: 2700,
+        label: `Column ${s.columns.length + 1}`,
+      }]
+    }))
+  },
+
+  // NO history push — caller must call pushHistory() before drag starts
+  updateColumn: (id, updates) => {
+    set(s => ({
+      columns: s.columns.map(c => c.id === id ? { ...c, ...updates } : c)
+    }))
+  },
+
+  removeColumn: (id) => {
+    get().pushHistory()
+    set(s => ({
+      columns: s.columns.filter(c => c.id !== id)
+    }))
+  },
+
+  addGuide: (start, end) => {
+    get().pushHistory()
+    set(s => ({
+      guides: [...s.guides, { id: uuid(), start, end }]
+    }))
+  },
+
+  removeGuide: (id) => {
+    get().pushHistory()
+    set(s => ({
+      guides: s.guides.filter(g => g.id !== id)
+    }))
+  },
+
+  // Auto-join all walls — merge any endpoints within threshold
+  autoJoinAll: () => {
+    const { walls } = get()
+    let changed = false
+    const newWalls = walls.map(w => {
+      const joined = autoJoinWall(w, walls)
+      if (joined.start.x !== w.start.x || joined.start.y !== w.start.y ||
+          joined.end.x !== w.end.x || joined.end.y !== w.end.y) {
+        changed = true
+      }
+      return joined
+    })
+    if (changed) set({ walls: newWalls })
+  },
+
+  // Re-enforce all H/V constraints + cascade to connected walls
+  enforceConstraints: () => {
+    const { walls } = get()
+    const enforced = enforceAllConstraints(walls)
+    // Check if anything changed
+    let changed = false
+    for (let i = 0; i < walls.length; i++) {
+      if (walls[i].start.x !== enforced[i].start.x || walls[i].start.y !== enforced[i].start.y ||
+          walls[i].end.x !== enforced[i].end.x || walls[i].end.y !== enforced[i].end.y) {
+        changed = true
+        break
+      }
     }
-    return {
-      walls: s.walls.map(w => w.id === wallId ? { ...w, openings: [...w.openings, opening] } : w)
-    }
-  }),
+    if (changed) set({ walls: enforced })
+  },
 
-  updateOpening: (wallId, openingId, updates) => set(s => ({
-    walls: s.walls.map(w => w.id === wallId ? {
-      ...w,
-      openings: w.openings.map(o => o.id === openingId ? { ...o, ...updates } : o)
-    } : w)
-  })),
-
-  removeOpening: (wallId, openingId) => set(s => ({
-    walls: s.walls.map(w => w.id === wallId ? {
-      ...w,
-      openings: w.openings.filter(o => o.id !== openingId)
-    } : w)
-  })),
-
-  addColumn: (position) => set(s => ({
-    columns: [...s.columns, {
-      id: uuid(),
-      position,
-      width: 300,
-      depth: 300,
-      height: 2700,
-      label: `Column ${s.columns.length + 1}`,
-    }]
-  })),
-
-  updateColumn: (id, updates) => set(s => ({
-    columns: s.columns.map(c => c.id === id ? { ...c, ...updates } : c)
-  })),
-
-  removeColumn: (id) => set(s => ({
-    columns: s.columns.filter(c => c.id !== id)
-  })),
-
-  addGuide: (start, end) => set(s => ({
-    guides: [...s.guides, { id: uuid(), start, end }]
-  })),
-
-  removeGuide: (id) => set(s => ({
-    guides: s.guides.filter(g => g.id !== id)
-  })),
-
-  clearWalls: () => set({ walls: [], columns: [], guides: [], selectedWallId: null }),
+  clearWalls: () => {
+    get().pushHistory()
+    set({ walls: [], columns: [], guides: [], selectedWallId: null })
+  },
 }))

@@ -47,13 +47,25 @@ function App() {
         selectItem(null)
         useUIStore.getState().setDragCatalogId(null)
       }
+      // F11 = Focus Mode (toggle both sidebars)
+      if (e.key === 'F11') {
+        e.preventDefault()
+        const ui = useUIStore.getState()
+        if (ui.leftOpen || ui.rightOpen) {
+          if (ui.leftOpen) ui.toggleLeft()
+          if (ui.rightOpen) ui.toggleRight()
+        } else {
+          if (!ui.leftOpen) ui.toggleLeft()
+          if (!ui.rightOpen) ui.toggleRight()
+        }
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [selectedId])
 
   return (
-    <div className="w-full h-full flex flex-col bg-[#0f0f1a]">
+    <div className="fixed inset-0 flex flex-col bg-[#0f0f1a] overflow-hidden">
       {/* Top Toolbar */}
       <div className="h-12 bg-[#1a1a2e] border-b border-gray-700 flex items-center px-4 gap-4 shrink-0">
         <div className="text-lg font-bold text-blue-400">Rough Design</div>
@@ -85,6 +97,28 @@ function App() {
           Create Room
         </button>
 
+        <div className="border-l border-gray-600 h-6 mx-1" />
+
+        {/* Undo / Redo */}
+        <button
+          onClick={() => useRoomStore.getState().undo()}
+          className="p-1.5 rounded hover:bg-gray-700 text-gray-400 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          title="Undo (Ctrl+Z)"
+        >
+          <svg viewBox="0 0 20 20" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M4 8l4-4M4 8l4 4M4 8h9a4 4 0 010 8H11" />
+          </svg>
+        </button>
+        <button
+          onClick={() => useRoomStore.getState().redo()}
+          className="p-1.5 rounded hover:bg-gray-700 text-gray-400 hover:text-white transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          title="Redo (Ctrl+Y)"
+        >
+          <svg viewBox="0 0 20 20" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M16 8l-4-4M16 8l-4 4M16 8H7a4 4 0 000 8h2" />
+          </svg>
+        </button>
+
         <div className="flex-1" />
 
         <span className="text-xs text-gray-400">{itemCount} items</span>
@@ -113,54 +147,66 @@ function App() {
           </button>
         </div>
 
-        {/* Leica DISTO S910 Bluetooth */}
-        {disto.isSupported && (
-          <div className="flex items-center gap-0.5">
-            <button
-              onClick={() => {
-                if (disto.status === 'connected') {
-                  disto.disconnect()
-                } else {
-                  disto.connect(false) // filtered scan
-                }
-              }}
-              className={`px-3 py-1 rounded-l text-xs font-bold flex items-center gap-1.5 transition-colors ${
-                disto.status === 'connected'
-                  ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
-                  : disto.status === 'connecting'
-                  ? 'bg-yellow-700 text-yellow-200 animate-pulse'
-                  : disto.status === 'error'
-                  ? 'bg-red-800 hover:bg-red-700 text-red-200'
-                  : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
-              }`}
-              title={
-                disto.status === 'connected'
-                  ? `${disto.deviceName} — Click to disconnect`
-                  : disto.error || 'Connect Leica DISTO via Bluetooth'
-              }
-            >
-              {/* Laser icon */}
-              <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="currentColor">
-                <path d="M1 8h3l2-3h4l2 3h3M8 5V1M5.5 5L3 2M10.5 5L13 2" stroke="currentColor" fill="none" strokeWidth="1.5" strokeLinecap="round" />
-                <circle cx="8" cy="10" r="2" />
-              </svg>
-              {disto.status === 'connected'
-                ? `${disto.deviceName}${disto.lastMeasurement ? ` ${disto.lastMeasurement}mm` : ''}`
-                : disto.status === 'connecting'
-                ? 'Connecting...'
-                : 'DISTO'}
-            </button>
-            {disto.status !== 'connected' && disto.status !== 'connecting' && (
-              <button
-                onClick={() => disto.connect(true)} // scan ALL devices
-                className="px-1.5 py-1 rounded-r bg-gray-700 hover:bg-gray-600 text-gray-400 hover:text-gray-200 text-xs border-l border-gray-600"
-                title="Scan all Bluetooth devices (if DISTO not found)"
-              >
-                &#x25BC;
-              </button>
+        {/* Focus Mode — hide both sidebars */}
+        <button
+          onClick={() => {
+            if (leftOpen || rightOpen) {
+              // Close both
+              if (leftOpen) toggleLeft()
+              if (rightOpen) toggleRight()
+            } else {
+              // Open both
+              if (!leftOpen) toggleLeft()
+              if (!rightOpen) toggleRight()
+            }
+          }}
+          className={`p-1.5 rounded transition-colors ${
+            !leftOpen && !rightOpen
+              ? 'bg-blue-600 text-white'
+              : 'hover:bg-gray-700 text-gray-400 hover:text-white'
+          }`}
+          title={leftOpen || rightOpen ? 'Focus Mode — ซ่อน sidebar (F11)' : 'แสดง sidebar'}
+        >
+          <svg viewBox="0 0 20 20" className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round">
+            {leftOpen || rightOpen ? (
+              <>
+                <rect x="2" y="3" width="16" height="14" rx="1.5" />
+                <line x1="6" y1="3" x2="6" y2="17" />
+                <line x1="14" y1="3" x2="14" y2="17" />
+                <path d="M8 10h4" />
+              </>
+            ) : (
+              <>
+                <rect x="2" y="3" width="16" height="14" rx="1.5" />
+                <path d="M4 8l2 2-2 2" />
+                <path d="M16 8l-2 2 2 2" />
+              </>
             )}
-          </div>
-        )}
+          </svg>
+        </button>
+
+        {/* Leica DISTO S910 — Keyboard BT mode indicator */}
+        <button
+          onClick={() => {
+            // Switch to dimension tool for DISTO workflow
+            useUIStore.getState().setSketchTool('dimension')
+            setViewMode('2d')
+          }}
+          className={`px-3 py-1 rounded text-xs font-bold flex items-center gap-1.5 transition-colors ${
+            useUIStore.getState().sketchTool === 'dimension'
+              ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+              : 'bg-gray-700 hover:bg-gray-600 text-gray-300'
+          }`}
+          title="DISTO Measure Mode — Click walls to input laser measurements (D)"
+        >
+          {/* Laser icon */}
+          <svg viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+            <path d="M1 8h3l2-3h4l2 3h3" />
+            <path d="M8 5V1M5.5 5L3 2M10.5 5L13 2" />
+            <circle cx="8" cy="10" r="2" fill="currentColor" />
+          </svg>
+          Laser
+        </button>
 
         <button
           onClick={() => {
@@ -183,7 +229,7 @@ function App() {
         {/* Left sidebar toggle */}
         <button
           onClick={toggleLeft}
-          className="w-6 bg-[#12122a] hover:bg-[#1a1a3a] border-r border-gray-700 flex items-center justify-center shrink-0 text-gray-500 hover:text-gray-300 transition-colors"
+          className="w-4 bg-[#12122a] hover:bg-[#1a1a3a] border-r border-gray-700 flex items-center justify-center shrink-0 text-gray-600 hover:text-gray-300 transition-colors text-[8px]"
           title={leftOpen ? 'Hide sidebar' : 'Show sidebar'}
         >
           {leftOpen ? '\u25C0' : '\u25B6'}
@@ -254,7 +300,7 @@ function App() {
         {/* Right sidebar toggle */}
         <button
           onClick={toggleRight}
-          className="w-6 bg-[#12122a] hover:bg-[#1a1a3a] border-l border-gray-700 flex items-center justify-center shrink-0 text-gray-500 hover:text-gray-300 transition-colors"
+          className="w-4 bg-[#12122a] hover:bg-[#1a1a3a] border-l border-gray-700 flex items-center justify-center shrink-0 text-gray-600 hover:text-gray-300 transition-colors text-[8px]"
           title={rightOpen ? 'Hide sidebar' : 'Show sidebar'}
         >
           {rightOpen ? '\u25B6' : '\u25C0'}

@@ -8,7 +8,8 @@ import type { UseLeicaDistoReturn } from '../../hooks/useLeicaDisto'
 
 const GRID_SIZE = 100
 const SNAP = 50
-const SNAP_RADIUS = 12 // px for endpoint snapping
+const SNAP_RADIUS_PX = 15 // px for visual snap indicator
+const SNAP_WORLD = 10 // mm — joint within 10mm radius
 
 function snap(v: number) {
   return Math.round(v / SNAP) * SNAP
@@ -59,6 +60,8 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
   const [dragTarget, setDragTarget] = useState<DragTarget>(null)
   const [hoverWallId, setHoverWallId] = useState<string | null>(null)
+  const [hoveredConstraintWallId, setHoveredConstraintWallId] = useState<string | null>(null)
+  const [selectedConstraintWallId, setSelectedConstraintWallId] = useState<string | null>(null)
 
   // Canvas mount trigger
   const [canvasReady, setCanvasReady] = useState(0)
@@ -73,6 +76,13 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
   // Constraint: first wall selected (for two-click constraints)
   const [constraintFirstWallId, setConstraintFirstWallId] = useState<string | null>(null)
 
+  // Lasso join — drag circle around endpoints to merge them
+  const [lassoStart, setLassoStart] = useState<{ sx: number; sy: number } | null>(null)
+  const [lassoEnd, setLassoEnd] = useState<{ sx: number; sy: number } | null>(null)
+
+  // Dimension input ref for iPad focus
+  const dimInputRef = useRef<HTMLInputElement>(null)
+
   // Editable dimension — wallId based, position computed dynamically
   const [editingDimWallId, setEditingDimWallId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -85,18 +95,20 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     return [(sx - panX) / scale, (sy - panY) / scale]
   }, [scale, panX, panY])
 
-  // Snap to existing wall endpoints
-  const snapToEndpoint = useCallback((wx: number, wy: number): Point2D => {
-    const threshold = SNAP_RADIUS / scale
+  // Snap to existing wall endpoints — ALWAYS prefers endpoints over grid
+  // Uses BOTH screen-space AND world-space threshold (whichever is larger)
+  const snapToEndpoint = useCallback((wx: number, wy: number): Point2D & { snapped?: boolean } => {
+    // At any zoom: at least 500mm OR 60 screen pixels (whichever gives more range)
+    const threshold = Math.max(SNAP_WORLD, SNAP_RADIUS_PX / scale)
     let bestDist = threshold
-    let result: Point2D = { x: snap(wx), y: snap(wy) }
+    let result: Point2D & { snapped?: boolean } = { x: snap(wx), y: snap(wy), snapped: false }
 
     for (const w of walls) {
       for (const pt of [w.start, w.end]) {
         const d = Math.sqrt((wx - pt.x) ** 2 + (wy - pt.y) ** 2)
         if (d < bestDist) {
           bestDist = d
-          result = { x: pt.x, y: pt.y }
+          result = { x: pt.x, y: pt.y, snapped: true }
         }
       }
     }
@@ -148,6 +160,22 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     return { sx: d1x, sy: d1y, ex: d2x, ey: d2y, labelX, labelY, length: interiorLen }
   }, [walls, toScreen])
 
+  // Returns screen-space center {x, y} of the constraint glyph for a wall, or null
+  const getConstraintGlyphPos = useCallback((w: Wall): { x: number; y: number } | null => {
+    if (!w.constraint) return null
+    const [sx, sy] = toScreen(w.start.x, w.start.y)
+    const [ex, ey] = toScreen(w.end.x, w.end.y)
+    const dx = ex - sx
+    const dy = ey - sy
+    const len = Math.sqrt(dx * dx + dy * dy)
+    if (len < 20) return null
+    const midX = (sx + ex) / 2
+    const midY = (sy + ey) / 2
+    const nx = -dy / len
+    const ny = dx / len
+    return { x: midX + nx * 16, y: midY + ny * 16 }
+  }, [toScreen])
+
   // Keyboard shortcuts
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -159,7 +187,37 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         setDrawStart(null)
         setRectStart(null)
         setConstraintFirstWallId(null)
+        setSelectedConstraintWallId(null)
         setSketchTool('select')
+        return
+      }
+      // Delete key: remove constraint from selected/hovered glyph
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const target = e.target as HTMLElement
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
+        const constraintTarget = selectedConstraintWallId || hoveredConstraintWallId
+        if (constraintTarget) {
+          e.preventDefault()
+          useRoomStore.getState().pushHistory()
+          useRoomStore.getState().updateWall(constraintTarget, { constraint: null })
+          setSelectedConstraintWallId(null)
+          setHoveredConstraintWallId(null)
+          return
+        }
+      }
+      // Undo / Redo (Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        if (e.shiftKey) {
+          useRoomStore.getState().redo()
+        } else {
+          useRoomStore.getState().undo()
+        }
+        return
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault()
+        useRoomStore.getState().redo()
         return
       }
       // Tool shortcuts (Fusion 360 style)
@@ -167,8 +225,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
       if (e.key === ' ') {
         e.preventDefault()
-        const last = useUIStore.getState().lastSketchTool
-        setSketchTool(last)
+        setSketchTool('select')
         return
       }
       switch (e.key.toLowerCase()) {
@@ -193,7 +250,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [editingDimWallId, setSketchTool])
+  }, [editingDimWallId, setSketchTool, selectedConstraintWallId, hoveredConstraintWallId])
 
   // Draw
   useEffect(() => {
@@ -269,7 +326,11 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       const isEditing = w.id === editingDimWallId
       const isTrimHover = sketchTool === 'trim' && isHovered
 
-      // Sketch line (thin, like Fusion 360)
+      // Determine constraint state for color
+      const isConstrained = !!(w.constraint)
+      // Sketch line colors — Fusion 360 style:
+      // Blue = unconstrained, White = constrained, Green = fixed
+      // (selected/hovered/editing override for feedback)
       if (isTrimHover) {
         ctx.strokeStyle = '#ff4444'
         ctx.lineWidth = 3
@@ -282,8 +343,13 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       } else if (isHovered) {
         ctx.strokeStyle = '#66ccff'
         ctx.lineWidth = 2
-      } else {
+      } else if (isConstrained) {
+        // Has H or V constraint → white (fully constrained direction)
         ctx.strokeStyle = '#e0e0e8'
+        ctx.lineWidth = 1.5
+      } else {
+        // No constraint → blue (under-constrained)
+        ctx.strokeStyle = '#4488ff'
         ctx.lineWidth = 1.5
       }
 
@@ -347,13 +413,85 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         }
       })
 
-      // Endpoint dots (Fusion 360 style — small squares/circles)
-      const dotR = isSelected || isHovered ? 4 : 3
-      for (const [px, py] of [[sx, sy], [ex, ey]] as const) {
-        ctx.fillStyle = isSelected ? '#00aaff' : isHovered ? '#66ccff' : '#aaaabb'
-        ctx.beginPath()
-        ctx.arc(px, py, dotR, 0, Math.PI * 2)
-        ctx.fill()
+      // Endpoint dots — show connected (green) vs open (gray/blue)
+      const EPS_DRAW = 5 // 5mm tolerance for connected check
+      for (const [px, py, pt] of [[sx, sy, w.start], [ex, ey, w.end]] as const) {
+        // Check if this endpoint is shared with another wall
+        let isConnected = false
+        for (const other of walls) {
+          if (other.id === w.id) continue
+          if ((Math.abs(other.start.x - pt.x) < EPS_DRAW && Math.abs(other.start.y - pt.y) < EPS_DRAW) ||
+              (Math.abs(other.end.x - pt.x) < EPS_DRAW && Math.abs(other.end.y - pt.y) < EPS_DRAW)) {
+            isConnected = true
+            break
+          }
+        }
+        const dotR = isSelected || isHovered ? 5 : 3.5
+        if (isConnected) {
+          // Connected = filled green dot
+          ctx.fillStyle = '#00ff88'
+          ctx.beginPath()
+          ctx.arc(px, py, dotR, 0, Math.PI * 2)
+          ctx.fill()
+        } else {
+          // Open endpoint = hollow circle
+          ctx.fillStyle = isSelected ? '#00aaff' : isHovered ? '#66ccff' : '#aaaabb'
+          ctx.beginPath()
+          ctx.arc(px, py, dotR, 0, Math.PI * 2)
+          ctx.fill()
+          // White hollow center for open endpoints
+          ctx.fillStyle = '#2d2d3d'
+          ctx.beginPath()
+          ctx.arc(px, py, dotR - 2, 0, Math.PI * 2)
+          ctx.fill()
+        }
+      }
+
+      // --- Constraint glyph (H/V) — Fusion 360 style, clickable ---
+      if (w.constraint) {
+        const wdx = ex - sx
+        const wdy = ey - sy
+        const wlen = Math.sqrt(wdx * wdx + wdy * wdy)
+        if (wlen > 20) {
+          const midX = (sx + ex) / 2
+          const midY = (sy + ey) / 2
+          const wnx = -wdy / wlen
+          const wny = wdx / wlen
+          const iconX = midX + wnx * 16
+          const iconY = midY + wny * 16
+
+          const isGlyphHovered = hoveredConstraintWallId === w.id
+          const isGlyphSelected = selectedConstraintWallId === w.id
+          const boxSize = 14
+
+          // Background box — brighten when hovered or selected
+          ctx.fillStyle = (isGlyphSelected || isGlyphHovered) ? '#2a2a4eee' : '#1a1a2ecc'
+          ctx.strokeStyle = w.constraint === 'H' ? (isGlyphSelected ? '#ff8888' : isGlyphHovered ? '#ff6666' : '#ff4444')
+                                                  : (isGlyphSelected ? '#88ff88' : isGlyphHovered ? '#66ff66' : '#44ff44')
+          ctx.lineWidth = (isGlyphSelected || isGlyphHovered) ? 2 : 1.5
+          ctx.beginPath()
+          ctx.roundRect(iconX - boxSize / 2, iconY - boxSize / 2, boxSize, boxSize, 3)
+          ctx.fill()
+          ctx.stroke()
+
+          // H or V letter
+          ctx.fillStyle = w.constraint === 'H'
+            ? (isGlyphSelected ? '#ffaaaa' : '#ff6666')
+            : (isGlyphSelected ? '#aaffaa' : '#66ff66')
+          ctx.font = 'bold 10px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          ctx.fillText(w.constraint, iconX, iconY)
+
+          // Small "×" delete hint when hovered
+          if (isGlyphHovered || isGlyphSelected) {
+            ctx.fillStyle = '#ffffff99'
+            ctx.font = '7px sans-serif'
+            ctx.textAlign = 'left'
+            ctx.textBaseline = 'top'
+            ctx.fillText('Del', iconX + boxSize / 2 + 2, iconY - 5)
+          }
+        }
       }
 
       // --- Show dimension for selected/hovered wall or all walls with dimension tool ---
@@ -627,6 +765,30 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       ctx.fillText(`${Math.round(rh)}`, Math.max(x1, x2) + 24, (y1 + y2) / 2)
     }
 
+    // --- Snap indicator (green ring when near an existing endpoint) ---
+    if (sketchTool === 'line' || sketchTool === 'rectangle' || sketchTool === 'construction' || sketchTool === 'column') {
+      const snapResult = snapToEndpoint(mouseWorld.x, mouseWorld.y)
+      if (snapResult.snapped) {
+        const [snapSx, snapSy] = toScreen(snapResult.x, snapResult.y)
+        // Outer green ring
+        ctx.strokeStyle = '#00ff88'
+        ctx.lineWidth = 2.5
+        ctx.beginPath()
+        ctx.arc(snapSx, snapSy, 10, 0, Math.PI * 2)
+        ctx.stroke()
+        // Inner green dot
+        ctx.fillStyle = '#00ff88'
+        ctx.beginPath()
+        ctx.arc(snapSx, snapSy, 3, 0, Math.PI * 2)
+        ctx.fill()
+        // Label
+        ctx.fillStyle = '#00ff88'
+        ctx.font = 'bold 9px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText('SNAP', snapSx, snapSy - 15)
+      }
+    }
+
     // --- Column placement preview ---
     if (sketchTool === 'column' && !dragTarget) {
       const snapped = snapToEndpoint(mouseWorld.x, mouseWorld.y)
@@ -703,7 +865,47 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       }
     }
 
-  }, [walls, columns, guides, items, panX, panY, scale, selectedWallId, hoverWallId, toScreen, editingDimWallId, drawStart, rectStart, mouseWorld, sketchTool, snapToEndpoint, dragTarget, getDimScreenPos, canvasReady, distoHook])
+    // --- Lasso selection rectangle ---
+    if (lassoStart && lassoEnd) {
+      const lx = Math.min(lassoStart.sx, lassoEnd.sx)
+      const ly = Math.min(lassoStart.sy, lassoEnd.sy)
+      const lw = Math.abs(lassoEnd.sx - lassoStart.sx)
+      const lh = Math.abs(lassoEnd.sy - lassoStart.sy)
+      ctx.strokeStyle = '#00ff88'
+      ctx.lineWidth = 1.5
+      ctx.setLineDash([6, 4])
+      ctx.strokeRect(lx, ly, lw, lh)
+      ctx.fillStyle = 'rgba(0,255,136,0.08)'
+      ctx.fillRect(lx, ly, lw, lh)
+      ctx.setLineDash([])
+
+      // Highlight endpoints inside lasso
+      const x1w = Math.min(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[0]))
+      const y1w = Math.min(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[1]))
+      const x2w = Math.max(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[0]))
+      const y2w = Math.max(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[1]))
+      let insideCount = 0
+      walls.forEach(w => {
+        for (const pt of [w.start, w.end]) {
+          if (pt.x >= x1w && pt.x <= x2w && pt.y >= y1w && pt.y <= y2w) {
+            const [px, py] = toScreen(pt.x, pt.y)
+            ctx.beginPath()
+            ctx.arc(px, py, 6, 0, Math.PI * 2)
+            ctx.fillStyle = '#00ff88'
+            ctx.fill()
+            insideCount++
+          }
+        }
+      })
+      if (insideCount >= 2) {
+        ctx.fillStyle = '#00ff88'
+        ctx.font = 'bold 11px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.fillText(`Join ${insideCount} points`, (lassoStart.sx + lassoEnd.sx) / 2, Math.min(lassoStart.sy, lassoEnd.sy) - 6)
+      }
+    }
+
+  }, [walls, columns, guides, items, panX, panY, scale, selectedWallId, hoverWallId, hoveredConstraintWallId, selectedConstraintWallId, toScreen, editingDimWallId, drawStart, rectStart, mouseWorld, sketchTool, snapToEndpoint, dragTarget, getDimScreenPos, canvasReady, distoHook, lassoStart, lassoEnd])
 
   // Force initial draw + resize observer
   useEffect(() => {
@@ -738,6 +940,20 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     }
     return null
   }, [walls, selectedWallId, editingDimWallId, sketchTool, getDimScreenPos])
+
+  // Find constraint glyph at mouse position — returns wallId or null
+  const findConstraintGlyphAt = useCallback((mx: number, my: number): string | null => {
+    for (const w of walls) {
+      if (!w.constraint) continue
+      const pos = getConstraintGlyphPos(w)
+      if (!pos) continue
+      // Hit radius of 10px around the glyph center
+      if (Math.sqrt((mx - pos.x) ** 2 + (my - pos.y) ** 2) < 10) {
+        return w.id
+      }
+    }
+    return null
+  }, [walls, getConstraintGlyphPos])
 
   const findWallAt = (mx: number, my: number): { wallId: string; part: 'start' | 'end' | 'body'; t?: number } | null => {
     const hitR = 8
@@ -789,10 +1005,29 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     return null
   }
 
+  // Parse dimension value — auto-detect meters vs mm from S910
+  const parseDimValue = (raw: string): number => {
+    // Clean up: remove spaces, commas → dots
+    let cleaned = raw.trim().replace(/,/g, '.').replace(/\s/g, '')
+    // Remove trailing units if S910 sends them
+    cleaned = cleaned.replace(/mm$/i, '').replace(/m$/i, '')
+
+    const val = parseFloat(cleaned)
+    if (isNaN(val)) return 0
+
+    // Auto-detect: if value has decimal and is < 100, likely meters → convert to mm
+    // e.g. 2.345 → 2345mm, 0.850 → 850mm
+    // Values >= 100 are already in mm (e.g. 2300)
+    if (cleaned.includes('.') && val < 100) {
+      return Math.round(val * 1000)
+    }
+    return Math.round(val)
+  }
+
   const applyDimEdit = () => {
     if (!editingDimWallId) return
-    const val = parseFloat(editValue)
-    if (isNaN(val) || val < 10) { setEditingDimWallId(null); return }
+    const targetLen = parseDimValue(editValue)
+    if (targetLen < 10) { setEditingDimWallId(null); return }
 
     const w = walls.find(ww => ww.id === editingDimWallId)
     if (!w) { setEditingDimWallId(null); return }
@@ -802,13 +1037,12 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     const curLen = Math.sqrt(dx * dx + dy * dy)
     if (curLen < 1) { setEditingDimWallId(null); return }
 
-    // User enters the line length directly
-    const targetLen = val
     const ratio = targetLen / curLen
     const newEnd = {
       x: snap(w.start.x + dx * ratio),
       y: snap(w.start.y + dy * ratio),
     }
+    useRoomStore.getState().pushHistory()
     updateWall(w.id, { end: newEnd })
 
     // Update connected walls that share the old endpoint
@@ -822,6 +1056,9 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         updateWall(other.id, { end: { x: newEnd.x, y: newEnd.y } })
       }
     })
+
+    // Enforce H/V constraints on all connected walls after dimension change
+    useRoomStore.getState().enforceConstraints()
 
     setEditingDimWallId(null)
   }
@@ -850,6 +1087,18 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     })
   }, [distoHook, editingDimWallId, selectedWallId])
 
+  // iPad: force focus on dimension input when it appears
+  useEffect(() => {
+    if (editingDimWallId && dimInputRef.current) {
+      // Multiple attempts — iPad Safari needs delay after render
+      const el = dimInputRef.current
+      el.focus()
+      el.select()
+      setTimeout(() => { el.focus(); el.select() }, 50)
+      setTimeout(() => { el.focus(); el.select() }, 200)
+    }
+  }, [editingDimWallId])
+
   const handleMouseDown = (e: React.MouseEvent) => {
     if (editingDimWallId) return
     const [mx, my] = getMousePos(e)
@@ -860,6 +1109,16 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       setDragTarget({ type: 'pan', startPanX: panX, startPanY: panY, startMouseX: mx, startMouseY: my })
       return
     }
+
+    // --- Check constraint glyph click (any tool, any button) ---
+    const constraintGlyphHit = findConstraintGlyphAt(mx, my)
+    if (constraintGlyphHit) {
+      // Toggle selection: click again to deselect
+      setSelectedConstraintWallId(prev => prev === constraintGlyphHit ? null : constraintGlyphHit)
+      return
+    }
+    // Clicking elsewhere clears constraint glyph selection
+    setSelectedConstraintWallId(null)
 
     // --- Check dimension label click first (any tool) ---
     const dimHit = findDimAt(mx, my)
@@ -879,7 +1138,9 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           setDrawStart(null)
         } else {
           addWall(drawStart, snapped)
-          setDrawStart(snapped) // chain
+          // Chain: use the actual joined endpoint (may have been auto-snapped)
+          const lastWall = useRoomStore.getState().walls[useRoomStore.getState().walls.length - 1]
+          setDrawStart(lastWall ? lastWall.end : snapped)
         }
       }
       return
@@ -920,18 +1181,27 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       if (hit) {
         const w = walls.find(ww => ww.id === hit.wallId)
         if (w) {
+          // If already constrained, toggle off
+          if (w.constraint) {
+            useRoomStore.getState().pushHistory()
+            updateWall(w.id, { constraint: null })
+            selectWall(hit.wallId)
+            return
+          }
           const ddx = Math.abs(w.end.x - w.start.x)
           const ddy = Math.abs(w.end.y - w.start.y)
           const oldEnd = { ...w.end }
+          const constraintType = ddx >= ddy ? 'H' : 'V'
           let newEnd: Point2D
+          useRoomStore.getState().pushHistory()
           if (ddx >= ddy) {
             const avgY = snap((w.start.y + w.end.y) / 2)
             newEnd = { x: w.end.x, y: avgY }
-            updateWall(w.id, { start: { x: w.start.x, y: avgY }, end: newEnd })
+            updateWall(w.id, { start: { x: w.start.x, y: avgY }, end: newEnd, constraint: 'H' as const })
           } else {
             const avgX = snap((w.start.x + w.end.x) / 2)
             newEnd = { x: avgX, y: w.end.y }
-            updateWall(w.id, { start: { x: avgX, y: w.start.y }, end: newEnd })
+            updateWall(w.id, { start: { x: avgX, y: w.start.y }, end: newEnd, constraint: 'V' as const })
           }
           // Update connected walls
           const EPS = 1
@@ -944,6 +1214,8 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
               updateWall(other.id, { end: { x: newEnd.x, y: newEnd.y } })
             }
           })
+          // Enforce H/V constraints on all connected walls after H/V change
+          useRoomStore.getState().enforceConstraints()
         }
         selectWall(hit.wallId)
       }
@@ -1023,12 +1295,29 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         setConstraintFirstWallId(null)
         return
       }
-      const bestWallId = hit.wallId
-      const bestPart = hit.part === 'body' ? 'start' : hit.part
-      const targetPt = firstWall.end
-      updateWall(bestWallId, { [bestPart]: { x: targetPt.x, y: targetPt.y } })
+      const secondWall = walls.find(ww => ww.id === hit.wallId)
+      if (!secondWall) { setConstraintFirstWallId(null); return }
+
+      // Find the closest pair of endpoints between the two walls
+      const pairs: { d: number; firstPart: 'start' | 'end'; secondPart: 'start' | 'end' }[] = []
+      for (const fp of ['start', 'end'] as const) {
+        for (const sp of ['start', 'end'] as const) {
+          const dx = firstWall[fp].x - secondWall[sp].x
+          const dy = firstWall[fp].y - secondWall[sp].y
+          pairs.push({ d: Math.sqrt(dx * dx + dy * dy), firstPart: fp, secondPart: sp })
+        }
+      }
+      pairs.sort((a, b) => a.d - b.d)
+      const best = pairs[0]
+
+      // Move second wall's endpoint to first wall's endpoint
+      const targetPt = firstWall[best.firstPart]
+      useRoomStore.getState().pushHistory()
+      updateWall(hit.wallId, { [best.secondPart]: { x: targetPt.x, y: targetPt.y } })
+      useRoomStore.getState().autoJoinAll()
+      useRoomStore.getState().enforceConstraints()
       setConstraintFirstWallId(null)
-      selectWall(bestWallId)
+      selectWall(hit.wallId)
       return
     }
 
@@ -1060,6 +1349,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     const colId = findColumnAt(mx, my)
     if (colId) {
       const col = columns.find(c => c.id === colId)!
+      useRoomStore.getState().pushHistory() // save before drag
       setDragTarget({
         type: 'column-move', columnId: colId,
         offsetX: wx - col.position.x, offsetY: wy - col.position.y,
@@ -1071,6 +1361,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     const hit = findWallAt(mx, my)
     if (hit) {
       selectWall(hit.wallId)
+      useRoomStore.getState().pushHistory() // save before drag
       if (hit.part === 'start') {
         setDragTarget({ type: 'wall-start', wallId: hit.wallId })
       } else if (hit.part === 'end') {
@@ -1084,7 +1375,13 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       }
     } else {
       selectWall(null)
-      setDragTarget({ type: 'pan', startPanX: panX, startPanY: panY, startMouseX: mx, startMouseY: my })
+      if (sketchTool === 'select') {
+        // Start lasso selection for joining endpoints
+        setLassoStart({ sx: mx, sy: my })
+        setLassoEnd({ sx: mx, sy: my })
+      } else {
+        setDragTarget({ type: 'pan', startPanX: panX, startPanY: panY, startMouseX: mx, startMouseY: my })
+      }
     }
   }
 
@@ -1104,13 +1401,25 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
     if (editingDimWallId) return
 
+    // Lasso drag
+    if (lassoStart) {
+      setLassoEnd({ sx: mx, sy: my })
+      return
+    }
+
     if (!dragTarget) {
       const hit = findWallAt(mx, my)
       const col = findColumnAt(mx, my)
       setHoverWallId(hit?.wallId || null)
+      // Check constraint glyph hover
+      const constraintGlyph = findConstraintGlyphAt(mx, my)
+      setHoveredConstraintWallId(constraintGlyph)
       const canvas = canvasRef.current
       if (canvas) {
-        if (sketchTool === 'line' || sketchTool === 'rectangle' || sketchTool === 'construction') {
+        // Constraint glyph hover takes priority for cursor
+        if (constraintGlyph) {
+          canvas.style.cursor = 'pointer'
+        } else if (sketchTool === 'line' || sketchTool === 'rectangle' || sketchTool === 'construction') {
           canvas.style.cursor = 'crosshair'
         } else if (sketchTool === 'hv' || sketchTool === 'perpendicular' || sketchTool === 'equal' || sketchTool === 'parallel' || sketchTool === 'coincident' || sketchTool === 'fix' || sketchTool === 'symmetric') {
           canvas.style.cursor = hit ? 'pointer' : 'default'
@@ -1146,10 +1455,18 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       return
     }
 
+    // Enforce H/V constraint during drag
+    const dragWall = walls.find(ww => ww.id === dragTarget.wallId)
     if (dragTarget.type === 'wall-start') {
-      updateWall(dragTarget.wallId, { start: { x: snappedX, y: snappedY } })
+      let sx = snappedX, sy = snappedY
+      if (dragWall?.constraint === 'H') sy = dragWall.end.y
+      if (dragWall?.constraint === 'V') sx = dragWall.end.x
+      updateWall(dragTarget.wallId, { start: { x: sx, y: sy } })
     } else if (dragTarget.type === 'wall-end') {
-      updateWall(dragTarget.wallId, { end: { x: snappedX, y: snappedY } })
+      let ex = snappedX, ey = snappedY
+      if (dragWall?.constraint === 'H') ey = dragWall.start.y
+      if (dragWall?.constraint === 'V') ex = dragWall.start.x
+      updateWall(dragTarget.wallId, { end: { x: ex, y: ey } })
     } else if (dragTarget.type === 'wall-move') {
       const w = walls.find(ww => ww.id === dragTarget.wallId)
       if (!w) return
@@ -1164,7 +1481,48 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     }
   }
 
-  const handleMouseUp = () => { setDragTarget(null) }
+  const handleMouseUp = () => {
+    // Lasso join — find all endpoints inside lasso rect, merge them to average point
+    if (lassoStart && lassoEnd) {
+      const x1w = Math.min(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[0]))
+      const y1w = Math.min(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[1]))
+      const x2w = Math.max(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[0]))
+      const y2w = Math.max(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[1]))
+
+      // Collect all endpoints inside the lasso rectangle
+      const hits: { wallId: string; part: 'start' | 'end'; pt: Point2D }[] = []
+      walls.forEach(w => {
+        if (w.start.x >= x1w && w.start.x <= x2w && w.start.y >= y1w && w.start.y <= y2w) {
+          hits.push({ wallId: w.id, part: 'start', pt: w.start })
+        }
+        if (w.end.x >= x1w && w.end.x <= x2w && w.end.y >= y1w && w.end.y <= y2w) {
+          hits.push({ wallId: w.id, part: 'end', pt: w.end })
+        }
+      })
+
+      if (hits.length >= 2) {
+        // Merge all to average position
+        const avgX = snap(hits.reduce((s, h) => s + h.pt.x, 0) / hits.length)
+        const avgY = snap(hits.reduce((s, h) => s + h.pt.y, 0) / hits.length)
+        useRoomStore.getState().pushHistory()
+        hits.forEach(h => {
+          updateWall(h.wallId, { [h.part]: { x: avgX, y: avgY } })
+        })
+        useRoomStore.getState().enforceConstraints()
+      }
+
+      setLassoStart(null)
+      setLassoEnd(null)
+      return
+    }
+
+    // Auto-join endpoints after dragging walls
+    if (dragTarget && (dragTarget.type === 'wall-start' || dragTarget.type === 'wall-end' || dragTarget.type === 'wall-move')) {
+      useRoomStore.getState().autoJoinAll()
+      useRoomStore.getState().enforceConstraints()
+    }
+    setDragTarget(null)
+  }
 
   const handleWheel = (e: React.WheelEvent) => {
     e.preventDefault()
@@ -1178,6 +1536,58 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     setScale(newScale)
   }
 
+  // --- Touch events for iPad (pinch-to-zoom + two-finger pan) ---
+  const touchRef = useRef<{ lastDist: number; lastMidX: number; lastMidY: number; fingers: number } | null>(null)
+
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (e.touches.length === 2) {
+      e.preventDefault()
+      const t0 = e.touches[0], t1 = e.touches[1]
+      const dist = Math.sqrt((t1.clientX - t0.clientX) ** 2 + (t1.clientY - t0.clientY) ** 2)
+      const midX = (t0.clientX + t1.clientX) / 2
+      const midY = (t0.clientY + t1.clientY) / 2
+      touchRef.current = { lastDist: dist, lastMidX: midX, lastMidY: midY, fingers: 2 }
+    } else if (e.touches.length === 1) {
+      touchRef.current = { lastDist: 0, lastMidX: e.touches[0].clientX, lastMidY: e.touches[0].clientY, fingers: 1 }
+    }
+  }, [])
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (!touchRef.current) return
+    if (e.touches.length === 2 && touchRef.current.fingers === 2) {
+      e.preventDefault()
+      const t0 = e.touches[0], t1 = e.touches[1]
+      const dist = Math.sqrt((t1.clientX - t0.clientX) ** 2 + (t1.clientY - t0.clientY) ** 2)
+      const midX = (t0.clientX + t1.clientX) / 2
+      const midY = (t0.clientY + t1.clientY) / 2
+
+      // Pinch zoom
+      const zoomFactor = dist / touchRef.current.lastDist
+      const newScale = Math.max(0.02, Math.min(0.5, scale * zoomFactor))
+
+      // Pan (two-finger drag)
+      const dx = midX - touchRef.current.lastMidX
+      const dy = midY - touchRef.current.lastMidY
+
+      // Zoom toward pinch center
+      const rect = canvasRef.current?.getBoundingClientRect()
+      const cx = midX - (rect?.left ?? 0)
+      const cy = midY - (rect?.top ?? 0)
+      const wx = (cx - panX) / scale
+      const wy = (cy - panY) / scale
+
+      setPanX(cx - wx * newScale + dx)
+      setPanY(cy - wy * newScale + dy)
+      setScale(newScale)
+
+      touchRef.current = { lastDist: dist, lastMidX: midX, lastMidY: midY, fingers: 2 }
+    }
+  }, [scale, panX, panY])
+
+  const handleTouchEnd = useCallback(() => {
+    touchRef.current = null
+  }, [])
+
   // Compute editing dimension overlay position
   const editingWall = editingDimWallId ? walls.find(w => w.id === editingDimWallId) : null
   const editDimPos = editingWall ? getDimScreenPos(editingWall) : null
@@ -1187,7 +1597,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       <canvas
         ref={canvasRef}
         className="w-full h-full"
-        style={{ display: 'block' }}
+        style={{ display: 'block', touchAction: 'none' }}
         onMouseDown={handleMouseDown}
         onMouseMove={handleMouseMove}
         onMouseUp={handleMouseUp}
@@ -1195,32 +1605,81 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         onDoubleClick={handleDoubleClick}
         onWheel={handleWheel}
         onContextMenu={e => e.preventDefault()}
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+        onTouchCancel={handleTouchEnd}
       />
 
-      {/* Editable dimension input overlay — Fusion 360 style */}
+      {/* Editable dimension input overlay — Fusion 360 style + S910 BT keyboard support */}
       {editingDimWallId && editDimPos && (
-        <input
-          autoFocus
-          type="number"
-          step={50}
-          value={editValue}
-          onChange={e => setEditValue(e.target.value)}
-          onKeyDown={e => {
-            if (e.key === 'Enter') applyDimEdit()
-            if (e.key === 'Escape') setEditingDimWallId(null)
-          }}
-          onBlur={applyDimEdit}
-          className="absolute border-2 rounded px-2 py-1 text-sm text-center font-bold shadow-lg outline-none"
+        <div
+          className="absolute flex flex-col items-center"
           style={{
-            left: editDimPos.labelX - 55,
-            top: editDimPos.labelY - 16,
-            width: 110,
-            zIndex: 10,
-            background: '#1a1a2e',
-            borderColor: '#00ccff',
-            color: '#00ccff',
+            left: editDimPos.labelX - 75,
+            top: editDimPos.labelY - 20,
+            zIndex: 100,
+            touchAction: 'auto',
           }}
-        />
+          onTouchStart={e => e.stopPropagation()}
+          onTouchMove={e => e.stopPropagation()}
+          onTouchEnd={e => e.stopPropagation()}
+          onMouseDown={e => e.stopPropagation()}
+        >
+          <input
+            ref={dimInputRef}
+            type="text"
+            inputMode="decimal"
+            enterKeyHint="done"
+            value={editValue}
+            onFocus={e => e.target.select()}
+            onChange={e => {
+              // Accept numbers, dots, commas from S910
+              const v = e.target.value.replace(/[^0-9.,\s]/g, '')
+              setEditValue(v)
+            }}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.preventDefault(); applyDimEdit() }
+              if (e.key === 'Escape') setEditingDimWallId(null)
+              if (e.key === 'Tab') e.preventDefault() // S910 may send Tab
+            }}
+            onBlur={() => {
+              // Don't auto-apply on blur — iPad keyboard causes blur when appearing
+              // User must press Enter, Done, or ✓ Apply button
+            }}
+            className="border-2 rounded px-2 py-1 text-sm text-center font-bold shadow-lg outline-none"
+            style={{
+              width: 150,
+              background: '#1a1a2e',
+              borderColor: '#00ccff',
+              color: '#00ccff',
+              fontSize: 20,
+              touchAction: 'auto',
+              WebkitUserSelect: 'text',
+              userSelect: 'text',
+            }}
+            placeholder="mm"
+          />
+          <div className="flex gap-2 mt-1">
+            <button
+              onClick={() => setEditingDimWallId(null)}
+              className="bg-gray-600 hover:bg-gray-500 text-white text-xs font-bold px-3 py-1.5 rounded"
+              style={{ touchAction: 'auto' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={applyDimEdit}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-1.5 rounded"
+              style={{ touchAction: 'auto' }}
+            >
+              Apply
+            </button>
+          </div>
+          <span style={{ color: '#666', fontSize: 10, marginTop: 2 }}>
+            mm (or m auto-convert)
+          </span>
+        </div>
       )}
     </div>
   )

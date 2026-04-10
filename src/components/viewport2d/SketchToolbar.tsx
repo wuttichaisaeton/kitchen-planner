@@ -252,8 +252,8 @@ export default function SketchToolbar() {
   })).filter(g => g.items.length > 0)
 
   return (
-    <div className="flex flex-col">
-      <div className="h-[54px] bg-[#1e1e30] border-b border-gray-700/50 flex items-end px-2 pb-1 gap-0.5 overflow-x-auto">
+    <div className="flex flex-col shrink-0">
+      <div className="h-[54px] bg-[#1e1e30] border-b border-gray-700/50 flex items-end px-2 pb-1 gap-0.5 overflow-x-auto shrink-0 sticky top-0 z-50">
         {grouped.map((group, gi) => (
           <div key={group.name} className="flex items-end gap-0.5 shrink-0">
             {gi > 0 && <div className="w-px h-10 bg-gray-600/40 mx-1 mb-0.5" />}

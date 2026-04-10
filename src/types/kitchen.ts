@@ -9,6 +9,8 @@ export interface Opening {
   sillHeight: number
 }
 
+export type WallConstraint = 'H' | 'V' | null
+
 export interface Wall {
   id: string
   start: Point2D
@@ -17,6 +19,7 @@ export interface Wall {
   height: number
   openings: Opening[]
   label?: string
+  constraint?: WallConstraint
 }
 
 export interface Column {
