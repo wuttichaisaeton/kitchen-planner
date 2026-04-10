@@ -58,6 +58,17 @@ const tools: { id: SketchTool; label: string; group: string; shortcut: string; i
     ),
   },
   {
+    id: 'fixed-glass', label: 'Fixed', group: 'CREATE', shortcut: 'I',
+    icon: (
+      <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8}>
+        <rect x="4" y="5" width="16" height="14" rx="0.5" />
+        <line x1="4" y1="5" x2="20" y2="19" strokeWidth={1} opacity={0.5} />
+        <line x1="20" y1="5" x2="4" y2="19" strokeWidth={1} opacity={0.5} />
+        <rect x="5" y="6" width="14" height="12" fill="rgba(100,180,255,0.2)" stroke="none" />
+      </svg>
+    ),
+  },
+  {
     id: 'column', label: 'Column', group: 'CREATE', shortcut: 'P',
     icon: (
       <svg viewBox="0 0 24 24" className="w-5 h-5" fill="none" stroke="currentColor" strokeWidth={1.8}>
@@ -227,6 +238,7 @@ const statusText: Record<string, string> = {
   dimension: 'Click on a wall — dimension opens for editing immediately.',
   door: 'Click on a wall to add a door',
   window: 'Click on a wall to add a window',
+  'fixed-glass': 'Click on a wall to add fixed glass',
   column: 'Click to place a column. ESC to cancel.',
   trim: 'Click on a wall, guide, or column to delete it.',
   offset: 'Select a wall, then specify offset distance.',

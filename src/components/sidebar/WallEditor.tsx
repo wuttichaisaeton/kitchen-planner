@@ -19,7 +19,7 @@ function OpeningRow({ wallId, opening }: { wallId: string; opening: Opening }) {
     <div className="bg-gray-800/60 rounded p-2 space-y-1.5">
       <div className="flex items-center justify-between">
         <span className="text-xs font-medium">
-          {opening.type === 'door' ? '🚪 Door' : '🪟 Window'}
+          {opening.type === 'door' ? '🚪 Door' : opening.type === 'fixed-glass' ? '🔲 Fixed Glass' : '🪟 Window'}
         </span>
         <button
           onClick={() => removeOpening(wallId, opening.id)}

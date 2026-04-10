@@ -20,6 +20,15 @@ const WINDOW_PRESETS = [
   { label: 'ช่องแสง 40×40', width: 400, height: 400, sill: 1800 },
 ]
 
+const FIXED_GLASS_PRESETS = [
+  { label: 'กระจกติดตาย 60×60', width: 600, height: 600, sill: 900 },
+  { label: 'กระจกติดตาย 80×110', width: 800, height: 1100, sill: 900 },
+  { label: 'กระจกติดตาย 100×150', width: 1000, height: 1500, sill: 600 },
+  { label: 'กระจกติดตาย 120×150', width: 1200, height: 1500, sill: 600 },
+  { label: 'กระจกติดตาย 180×200', width: 1800, height: 2000, sill: 200 },
+  { label: 'กระจกเต็มผนัง 200×240', width: 2000, height: 2400, sill: 0 },
+]
+
 export default function OpeningDialog() {
   const showOpeningDialog = useUIStore(s => s.showOpeningDialog)
   const openingPreset = useUIStore(s => s.openingPreset)
@@ -49,7 +58,8 @@ export default function OpeningDialog() {
   if (!showOpeningDialog || !openingPreset) return null
 
   const isDoor = openingPreset.type === 'door'
-  const presets = isDoor ? DOOR_PRESETS : WINDOW_PRESETS
+  const isFixedGlass = openingPreset.type === 'fixed-glass'
+  const presets = isDoor ? DOOR_PRESETS : isFixedGlass ? FIXED_GLASS_PRESETS : WINDOW_PRESETS
 
   const handleConfirm = () => {
     confirmOpeningPreset({
@@ -85,10 +95,10 @@ export default function OpeningDialog() {
       >
         {/* Header */}
         <div className="px-5 py-3 bg-gray-50 border-b border-gray-200 flex items-center gap-3">
-          <span className="text-2xl">{isDoor ? '🚪' : '🪟'}</span>
+          <span className="text-2xl">{isDoor ? '🚪' : isFixedGlass ? '🔲' : '🪟'}</span>
           <div>
             <div className="text-sm font-bold text-gray-800">
-              {isDoor ? 'ประตู (Door)' : 'หน้าต่าง (Window)'}
+              {isDoor ? 'ประตู (Door)' : isFixedGlass ? 'กระจกติดตาย (Fixed Glass)' : 'หน้าต่าง (Window)'}
             </div>
             <div className="text-[10px] text-gray-500">กำหนดขนาดและรูปแบบ แล้วคลิกวางบนผนัง</div>
           </div>
@@ -142,7 +152,7 @@ export default function OpeningDialog() {
             </label>
           </div>
 
-          {/* Window sill height */}
+          {/* Window / Fixed glass sill height */}
           {!isDoor && (
             <label className="text-xs text-gray-600 block">
               <span className="block mb-0.5 font-medium">ความสูงขอบล่าง (mm)</span>

@@ -2,7 +2,7 @@ export type Point2D = { x: number; y: number }
 
 export interface Opening {
   id: string
-  type: 'door' | 'window'
+  type: 'door' | 'window' | 'fixed-glass'
   offsetFromStart: number
   width: number
   height: number

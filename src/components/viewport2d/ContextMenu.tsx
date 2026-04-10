@@ -9,6 +9,7 @@ const ALL_TOOLS: { id: SketchTool; label: string; shortcut: string; group: strin
   { id: 'construction', label: 'Guide', shortcut: 'X', group: 'CREATE' },
   { id: 'door', label: 'Door', shortcut: 'O', group: 'CREATE' },
   { id: 'window', label: 'Window', shortcut: 'N', group: 'CREATE' },
+  { id: 'fixed-glass', label: 'Fixed Glass', shortcut: 'I', group: 'CREATE' },
   { id: 'column', label: 'Column', shortcut: 'P', group: 'CREATE' },
   { id: 'dimension', label: 'Dimension', shortcut: 'D', group: 'INSPECT' },
   { id: 'trim', label: 'Trim/Delete', shortcut: 'T', group: 'MODIFY' },

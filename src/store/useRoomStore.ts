@@ -172,7 +172,7 @@ interface RoomState {
   updateWall: (id: string, updates: Partial<Pick<Wall, 'start' | 'end' | 'thickness' | 'height' | 'constraint' | 'dimensionValue'>>) => void
   removeWall: (id: string) => void
   selectWall: (id: string | null) => void
-  addOpening: (wallId: string, type: 'door' | 'window', offsetMM?: number, widthMM?: number) => void
+  addOpening: (wallId: string, type: 'door' | 'window' | 'fixed-glass', offsetMM?: number, widthMM?: number) => void
   updateOpening: (wallId: string, openingId: string, updates: Partial<Opening>) => void
   updateOpeningNoHistory: (wallId: string, openingId: string, updates: Partial<Opening>) => void
   removeOpening: (wallId: string, openingId: string) => void

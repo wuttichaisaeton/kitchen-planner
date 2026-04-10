@@ -4,10 +4,10 @@ type ViewMode = '2d' | '3d'
 type ActiveTool = 'select' | 'wall' | 'place'
 type SidePanel = 'catalog' | 'properties' | 'quotation'
 type LeftTab = 'catalog' | 'walls'
-export type SketchTool = 'select' | 'line' | 'rectangle' | 'dimension' | 'door' | 'window' | 'column' | 'trim' | 'construction' | 'offset' | 'fillet' | 'mirror' | 'hv' | 'perpendicular' | 'fix' | 'equal' | 'parallel' | 'coincident' | 'symmetric'
+export type SketchTool = 'select' | 'line' | 'rectangle' | 'dimension' | 'door' | 'window' | 'fixed-glass' | 'column' | 'trim' | 'construction' | 'offset' | 'fillet' | 'mirror' | 'hv' | 'perpendicular' | 'fix' | 'equal' | 'parallel' | 'coincident' | 'symmetric'
 
 export interface OpeningPreset {
-  type: 'door' | 'window'
+  type: 'door' | 'window' | 'fixed-glass'
   width: number       // mm
   height: number      // mm
   sillHeight: number   // mm (window only)
@@ -78,13 +78,14 @@ export const useUIStore = create<UIState>((set) => ({
   setLeftTab: (leftTab) => set({ leftTab, leftOpen: true }),
   setSketchTool: (sketchTool) => set(s => {
     // When selecting door/window tool, show dialog first
-    if (sketchTool === 'door' || sketchTool === 'window') {
+    if (sketchTool === 'door' || sketchTool === 'window' || sketchTool === 'fixed-glass') {
+      const openingType = sketchTool === 'door' ? 'door' : sketchTool === 'window' ? 'window' : 'fixed-glass'
       return {
         sketchTool,
         lastSketchTool: s.sketchTool !== 'select' ? s.sketchTool : s.lastSketchTool,
         showOpeningDialog: true,
-        openingPreset: s.openingPreset?.type === sketchTool ? s.openingPreset : {
-          type: sketchTool,
+        openingPreset: s.openingPreset?.type === openingType ? s.openingPreset : {
+          type: openingType,
           width: sketchTool === 'door' ? 900 : 1200,
           height: sketchTool === 'door' ? 2100 : 1200,
           sillHeight: sketchTool === 'door' ? 0 : 900,
