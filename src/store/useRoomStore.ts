@@ -182,6 +182,7 @@ interface RoomState {
   addGuide: (start: Point2D, end: Point2D) => void
   removeGuide: (id: string) => void
   applyHVConstraint: (wallId: string) => void
+  applyHVConstraintAll: () => void
   applyDimension: (wallId: string, newLength: number) => void
   isOverConstrained: (wallId: string) => boolean
   removeDimension: (wallId: string) => void
@@ -452,6 +453,29 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     propagateDimensionAware(newWalls, wallId, oldStart, target.start)
 
     // Enforce H/V constraints
+    newWalls = enforceAllConstraints(newWalls)
+    set({ walls: newWalls })
+  },
+
+  // Apply H/V constraint to ALL walls at once (single undo step)
+  applyHVConstraintAll: () => {
+    get().pushHistory()
+    const { walls } = get()
+    let newWalls = walls.map(ww => ({ ...ww, start: { ...ww.start }, end: { ...ww.end } }))
+
+    newWalls.forEach(w => {
+      if (w.constraint) return // already constrained, skip
+      const ddx = Math.abs(w.end.x - w.start.x)
+      const ddy = Math.abs(w.end.y - w.start.y)
+      if (ddx >= ddy) {
+        w.end.y = w.start.y
+        w.constraint = 'H'
+      } else {
+        w.end.x = w.start.x
+        w.constraint = 'V'
+      }
+    })
+
     newWalls = enforceAllConstraints(newWalls)
     set({ walls: newWalls })
   },

@@ -236,6 +236,15 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         useRoomStore.getState().redo()
         return
       }
+      // Ctrl+A — Apply current constraint tool to ALL walls
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault()
+        const tool = useUIStore.getState().sketchTool
+        if (tool === 'hv') {
+          useRoomStore.getState().applyHVConstraintAll()
+        }
+        return
+      }
       // Tool shortcuts (Fusion 360 style)
       const target = e.target as HTMLElement
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') return
