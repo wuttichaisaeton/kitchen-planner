@@ -236,13 +236,16 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         useRoomStore.getState().redo()
         return
       }
-      // Ctrl+A — Apply current constraint tool to ALL walls
+      // Ctrl+A — Apply current constraint tool to ALL walls (prevent browser select-all)
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault()
+        e.stopPropagation()
         const tool = useUIStore.getState().sketchTool
         if (tool === 'hv') {
           useRoomStore.getState().applyHVConstraintAll()
         }
+        // Clear any browser text selection
+        window.getSelection()?.removeAllRanges()
         return
       }
       // Tool shortcuts (Fusion 360 style)
@@ -276,8 +279,8 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         case 's': setSketchTool('symmetric'); break
       }
     }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
+    window.addEventListener('keydown', handler, true)
+    return () => window.removeEventListener('keydown', handler, true)
   }, [editingDimWallId, setSketchTool, selectedConstraintWallId, hoveredConstraintWallId])
 
   // Draw
