@@ -358,38 +358,70 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         const oy1 = sy + dy * t
         const ox2 = sx + dx * t2
         const oy2 = sy + dy * t2
+        const halfT = Math.max(3, (w.thickness / 2) * scale)
 
         if (op.type === 'door') {
-          // Door gap (break in line)
-          ctx.strokeStyle = '#8B6914'
-          ctx.lineWidth = 3
+          // Clear the wall gap (white rectangle over the wall)
+          ctx.fillStyle = '#ffffff'
+          ctx.beginPath()
+          ctx.moveTo(ox1 + nx * halfT, oy1 + ny * halfT)
+          ctx.lineTo(ox2 + nx * halfT, oy2 + ny * halfT)
+          ctx.lineTo(ox2 - nx * halfT, oy2 - ny * halfT)
+          ctx.lineTo(ox1 - nx * halfT, oy1 - ny * halfT)
+          ctx.closePath()
+          ctx.fill()
+
+          // Door leaf line (from hinge to door edge)
+          ctx.strokeStyle = '#333333'
+          ctx.lineWidth = 1.5
           ctx.beginPath()
           ctx.moveTo(ox1, oy1)
-          ctx.lineTo(ox2, oy2)
+          // Door swings perpendicular — leaf goes to one side
+          ctx.lineTo(ox1 + nx * (op.width * scale), oy1 + ny * (op.width * scale))
           ctx.stroke()
-          // Door swing arc
-          const doorWidth = op.width * scale
-          const angle = Math.atan2(ey - sy, ex - sx)
-          ctx.strokeStyle = '#8B691466'
-          ctx.lineWidth = 1
+
+          // Door swing arc (quarter circle, small)
+          const doorScreenW = Math.sqrt((ox2 - ox1) ** 2 + (oy2 - oy1) ** 2)
+          const angle = Math.atan2(oy2 - oy1, ox2 - ox1)
+          const arcAngle = Math.atan2(ny, nx)
+          ctx.strokeStyle = '#999999'
+          ctx.lineWidth = 0.8
           ctx.setLineDash([3, 3])
           ctx.beginPath()
-          ctx.arc(ox1, oy1, doorWidth, angle - Math.PI / 2, angle, false)
+          ctx.arc(ox1, oy1, doorScreenW, arcAngle, angle, false)
           ctx.stroke()
           ctx.setLineDash([])
         } else {
-          // Window — cyan double lines
-          const wnx = nx * thick * 0.3
-          const wny = ny * thick * 0.3
-          ctx.strokeStyle = '#4a90d9'
-          ctx.lineWidth = 2
+          // Window — architectural floor plan style
+          // Clear wall gap
+          ctx.fillStyle = '#ffffff'
           ctx.beginPath()
-          ctx.moveTo(ox1 + wnx, oy1 + wny)
-          ctx.lineTo(ox2 + wnx, oy2 + wny)
+          ctx.moveTo(ox1 + nx * halfT, oy1 + ny * halfT)
+          ctx.lineTo(ox2 + nx * halfT, oy2 + ny * halfT)
+          ctx.lineTo(ox2 - nx * halfT, oy2 - ny * halfT)
+          ctx.lineTo(ox1 - nx * halfT, oy1 - ny * halfT)
+          ctx.closePath()
+          ctx.fill()
+
+          // Window symbol: three parallel lines
+          const lineOff = halfT * 0.6
+          ctx.strokeStyle = '#333333'
+          ctx.lineWidth = 1.5
+          // Outer lines
+          ctx.beginPath()
+          ctx.moveTo(ox1 + nx * lineOff, oy1 + ny * lineOff)
+          ctx.lineTo(ox2 + nx * lineOff, oy2 + ny * lineOff)
           ctx.stroke()
           ctx.beginPath()
-          ctx.moveTo(ox1 - wnx, oy1 - wny)
-          ctx.lineTo(ox2 - wnx, oy2 - wny)
+          ctx.moveTo(ox1 - nx * lineOff, oy1 - ny * lineOff)
+          ctx.lineTo(ox2 - nx * lineOff, oy2 - ny * lineOff)
+          ctx.stroke()
+          // Center line (glass)
+          ctx.strokeStyle = '#0066cc'
+          ctx.lineWidth = 1
+          ctx.beginPath()
+          ctx.moveTo(ox1, oy1)
+          ctx.lineTo(ox2, oy2)
           ctx.stroke()
         }
       })
