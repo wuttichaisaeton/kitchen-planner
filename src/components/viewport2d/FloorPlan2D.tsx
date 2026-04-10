@@ -524,7 +524,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       }
 
       // --- Show dimension: only dimensioned walls + selected + dimension tool ---
-      const isDimensioned = !!w.dimensioned
+      const isDimensioned = !!w.dimensionValue
       const showDim = isDimensioned || isSelected || isEditing || sketchTool === 'dimension'
       // Non-dimensioned walls: only show when selected or editing (not in dimension tool list)
       const showDimLine = isDimensioned || isSelected || isEditing
@@ -1138,7 +1138,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     if (!w) return
 
     // Check over-constraint — already dimensioned walls can be edited
-    if (!w.dimensioned && useRoomStore.getState().isOverConstrained(wallId)) {
+    if (!w.dimensionValue && useRoomStore.getState().isOverConstrained(wallId)) {
       setOverConstrainedWallId(wallId)
       selectWall(wallId)
       return
@@ -1691,7 +1691,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
             >
               Cancel
             </button>
-            {editingDimWallId && walls.find(w => w.id === editingDimWallId)?.dimensioned && (
+            {editingDimWallId && walls.find(w => w.id === editingDimWallId)?.dimensionValue && (
               <button
                 onClick={() => {
                   useRoomStore.getState().removeDimension(editingDimWallId)

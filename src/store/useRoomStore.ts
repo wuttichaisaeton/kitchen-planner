@@ -42,7 +42,23 @@ function enforceAllConstraints(walls: Wall[]): Wall[] {
   const EPS = 5
   let result = walls.map(w => ({ ...w, start: { ...w.start }, end: { ...w.end } }))
 
-  // Multiple passes to cascade changes through connections
+  // Helper: propagate a point change from oldPt to newPt across all connected walls
+  function propagatePointChange(
+    skipIdx: number, oldX: number, oldY: number, newX: number, newY: number
+  ) {
+    for (let j = 0; j < result.length; j++) {
+      if (j === skipIdx) continue
+      const other = result[j]
+      if (Math.abs(other.start.x - oldX) < EPS && Math.abs(other.start.y - oldY) < EPS) {
+        other.start.x = newX; other.start.y = newY
+      }
+      if (Math.abs(other.end.x - oldX) < EPS && Math.abs(other.end.y - oldY) < EPS) {
+        other.end.x = newX; other.end.y = newY
+      }
+    }
+  }
+
+  // Pass 1: Enforce H/V constraints + propagate
   for (let pass = 0; pass < 5; pass++) {
     let changed = false
 
@@ -50,50 +66,55 @@ function enforceAllConstraints(walls: Wall[]): Wall[] {
       const w = result[i]
       if (!w.constraint) continue
 
-      // Save old positions for propagation
       const oldStartX = w.start.x, oldStartY = w.start.y
       const oldEndX = w.end.x, oldEndY = w.end.y
 
       if (w.constraint === 'H') {
-        // Horizontal: both endpoints must have same Y
         if (Math.abs(w.start.y - w.end.y) > 0.1) {
-          // Use start.y as the reference (it was set when constraint was applied)
           w.end.y = w.start.y
           changed = true
         }
       } else if (w.constraint === 'V') {
-        // Vertical: both endpoints must have same X
         if (Math.abs(w.start.x - w.end.x) > 0.1) {
-          // Use start.x as the reference
           w.end.x = w.start.x
           changed = true
         }
       }
 
-      // Propagate endpoint changes to connected walls (use result positions, not original)
       if (oldStartX !== w.start.x || oldStartY !== w.start.y ||
           oldEndX !== w.end.x || oldEndY !== w.end.y) {
-        for (let j = 0; j < result.length; j++) {
-          if (i === j) continue
-          const other = result[j]
-          // If other's start was connected to this wall's start (old position)
-          if (Math.abs(other.start.x - oldStartX) < EPS && Math.abs(other.start.y - oldStartY) < EPS) {
-            other.start.x = w.start.x; other.start.y = w.start.y
-          }
-          // If other's start was connected to this wall's end (old position)
-          if (Math.abs(other.start.x - oldEndX) < EPS && Math.abs(other.start.y - oldEndY) < EPS) {
-            other.start.x = w.end.x; other.start.y = w.end.y
-          }
-          // If other's end was connected to this wall's start (old position)
-          if (Math.abs(other.end.x - oldStartX) < EPS && Math.abs(other.end.y - oldStartY) < EPS) {
-            other.end.x = w.start.x; other.end.y = w.start.y
-          }
-          // If other's end was connected to this wall's end (old position)
-          if (Math.abs(other.end.x - oldEndX) < EPS && Math.abs(other.end.y - oldEndY) < EPS) {
-            other.end.x = w.end.x; other.end.y = w.end.y
-          }
-        }
+        propagatePointChange(i, oldStartX, oldStartY, w.start.x, w.start.y)
+        propagatePointChange(i, oldEndX, oldEndY, w.end.x, w.end.y)
       }
+    }
+
+    if (!changed) break
+  }
+
+  // Pass 2: Preserve dimensioned wall lengths
+  // If a dimensioned wall's length has drifted, restore it and let undimensioned walls absorb
+  for (let pass = 0; pass < 5; pass++) {
+    let changed = false
+
+    for (let i = 0; i < result.length; i++) {
+      const w = result[i]
+      if (!w.dimensionValue) continue
+
+      const dx = w.end.x - w.start.x
+      const dy = w.end.y - w.start.y
+      const curLen = Math.sqrt(dx * dx + dy * dy)
+      if (curLen < 1) continue
+      if (Math.abs(curLen - w.dimensionValue) < 1) continue // within 1mm tolerance
+
+      // Restore the dimensioned length by adjusting end point
+      const ratio = w.dimensionValue / curLen
+      const oldEndX = w.end.x, oldEndY = w.end.y
+      w.end.x = w.start.x + dx * ratio
+      w.end.y = w.start.y + dy * ratio
+      changed = true
+
+      // Propagate end-point change to connected walls
+      propagatePointChange(i, oldEndX, oldEndY, w.end.x, w.end.y)
     }
 
     if (!changed) break
@@ -125,7 +146,7 @@ interface RoomState {
   canRedo: () => boolean
   setRoomRect: (w: number, d: number) => void
   addWall: (start: Point2D, end: Point2D) => void
-  updateWall: (id: string, updates: Partial<Pick<Wall, 'start' | 'end' | 'thickness' | 'height' | 'constraint' | 'dimensioned'>>) => void
+  updateWall: (id: string, updates: Partial<Pick<Wall, 'start' | 'end' | 'thickness' | 'height' | 'constraint' | 'dimensionValue'>>) => void
   removeWall: (id: string) => void
   selectWall: (id: string | null) => void
   addOpening: (wallId: string, type: 'door' | 'window') => void
@@ -410,6 +431,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   },
 
   // Apply dimension atomically — resize wall + move connected walls
+  // Respects other dimensioned walls: undimensioned walls absorb changes
   applyDimension: (wallId: string, newLength: number) => {
     get().pushHistory()
     const { walls } = get()
@@ -430,7 +452,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     let newWalls = walls.map(ww => ({ ...ww, start: { ...ww.start }, end: { ...ww.end } }))
     const target = newWalls.find(ww => ww.id === wallId)!
     target.end = newEnd
-    target.dimensioned = true
+    target.dimensionValue = newLength
 
     // Propagate to connected walls (only end side moves)
     for (const other of newWalls) {
@@ -443,7 +465,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       }
     }
 
-    // Enforce all constraints
+    // Enforce H/V constraints + preserve dimensioned wall lengths
     newWalls = enforceAllConstraints(newWalls)
     set({ walls: newWalls })
   },
@@ -456,7 +478,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     const { walls } = get()
     const w = walls.find(ww => ww.id === wallId)
     if (!w) return false
-    if (w.dimensioned) return false // already dimensioned — allow editing
+    if (w.dimensionValue) return false // already dimensioned — allow editing
 
     // Find which direction this wall primarily goes
     const dx = Math.abs(w.end.x - w.start.x)
@@ -477,7 +499,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     const othersInDir = sameDir.filter(ww => ww.id !== wallId)
     if (othersInDir.length === 0) return false
 
-    const allOthersDimensioned = othersInDir.every(ww => ww.dimensioned)
+    const allOthersDimensioned = othersInDir.every(ww => !!ww.dimensionValue)
     return allOthersDimensioned
   },
 
@@ -485,7 +507,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
   removeDimension: (wallId: string) => {
     get().pushHistory()
     set(s => ({
-      walls: s.walls.map(w => w.id === wallId ? { ...w, dimensioned: false } : w)
+      walls: s.walls.map(w => w.id === wallId ? { ...w, dimensionValue: undefined } : w)
     }))
   },
 

@@ -20,7 +20,7 @@ export interface Wall {
   openings: Opening[]
   label?: string
   constraint?: WallConstraint
-  dimensioned?: boolean // User explicitly set dimension (like Fusion 360 green dim)
+  dimensionValue?: number // User-set dimension length in mm (undefined = not dimensioned)
 }
 
 export interface Column {
