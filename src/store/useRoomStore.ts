@@ -463,18 +463,28 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     const { walls } = get()
     let newWalls = walls.map(ww => ({ ...ww, start: { ...ww.start }, end: { ...ww.end } }))
 
-    newWalls.forEach(w => {
-      if (w.constraint) return // already constrained, skip
-      const ddx = Math.abs(w.end.x - w.start.x)
-      const ddy = Math.abs(w.end.y - w.start.y)
+    // Apply one wall at a time with proper propagation (order matters)
+    const unconstrained = newWalls.filter(w => !w.constraint)
+    for (const w of unconstrained) {
+      const target = newWalls.find(ww => ww.id === w.id)!
+      const oldStart = { ...target.start }
+      const oldEnd = { ...target.end }
+
+      const ddx = Math.abs(target.end.x - target.start.x)
+      const ddy = Math.abs(target.end.y - target.start.y)
+
       if (ddx >= ddy) {
-        w.end.y = w.start.y
-        w.constraint = 'H'
+        target.end.y = target.start.y
+        target.constraint = 'H'
       } else {
-        w.end.x = w.start.x
-        w.constraint = 'V'
+        target.end.x = target.start.x
+        target.constraint = 'V'
       }
-    })
+
+      // Propagate connected endpoints
+      propagateDimensionAware(newWalls, w.id, oldEnd, target.end)
+      propagateDimensionAware(newWalls, w.id, oldStart, target.start)
+    }
 
     newWalls = enforceAllConstraints(newWalls)
     set({ walls: newWalls })
