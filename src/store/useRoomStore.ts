@@ -183,6 +183,7 @@ interface RoomState {
   removeGuide: (id: string) => void
   applyHVConstraint: (wallId: string) => void
   applyHVConstraintAll: () => void
+  applyHVConstraintBatch: (wallIds: string[]) => void
   applyDimension: (wallId: string, newLength: number) => void
   isOverConstrained: (wallId: string) => boolean
   removeDimension: (wallId: string) => void
@@ -484,6 +485,37 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       // Propagate connected endpoints
       propagateDimensionAware(newWalls, w.id, oldEnd, target.end)
       propagateDimensionAware(newWalls, w.id, oldStart, target.start)
+    }
+
+    newWalls = enforceAllConstraints(newWalls)
+    set({ walls: newWalls })
+  },
+
+  // Apply H/V constraint to specific walls (single undo step)
+  applyHVConstraintBatch: (wallIds: string[]) => {
+    get().pushHistory()
+    const { walls } = get()
+    let newWalls = walls.map(ww => ({ ...ww, start: { ...ww.start }, end: { ...ww.end } }))
+
+    for (const wallId of wallIds) {
+      const target = newWalls.find(ww => ww.id === wallId)
+      if (!target || target.constraint) continue
+
+      const oldStart = { ...target.start }
+      const oldEnd = { ...target.end }
+      const ddx = Math.abs(target.end.x - target.start.x)
+      const ddy = Math.abs(target.end.y - target.start.y)
+
+      if (ddx >= ddy) {
+        target.end.y = target.start.y
+        target.constraint = 'H'
+      } else {
+        target.end.x = target.start.x
+        target.constraint = 'V'
+      }
+
+      propagateDimensionAware(newWalls, wallId, oldEnd, target.end)
+      propagateDimensionAware(newWalls, wallId, oldStart, target.start)
     }
 
     newWalls = enforceAllConstraints(newWalls)

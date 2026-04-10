@@ -1026,37 +1026,73 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       const ly = Math.min(lassoStart.sy, lassoEnd.sy)
       const lw = Math.abs(lassoEnd.sx - lassoStart.sx)
       const lh = Math.abs(lassoEnd.sy - lassoStart.sy)
-      ctx.strokeStyle = '#009944'
-      ctx.lineWidth = 1.5
-      ctx.setLineDash([6, 4])
-      ctx.strokeRect(lx, ly, lw, lh)
-      ctx.fillStyle = 'rgba(0,255,136,0.08)'
-      ctx.fillRect(lx, ly, lw, lh)
-      ctx.setLineDash([])
 
-      // Highlight endpoints inside lasso
       const x1w = Math.min(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[0]))
       const y1w = Math.min(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[1]))
       const x2w = Math.max(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[0]))
       const y2w = Math.max(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[1]))
-      let insideCount = 0
-      walls.forEach(w => {
-        for (const pt of [w.start, w.end]) {
-          if (pt.x >= x1w && pt.x <= x2w && pt.y >= y1w && pt.y <= y2w) {
-            const [px, py] = toScreen(pt.x, pt.y)
+
+      if (sketchTool === 'hv') {
+        // H/V lasso — orange selection, highlight walls inside
+        ctx.strokeStyle = '#cc8800'
+        ctx.lineWidth = 1.5
+        ctx.setLineDash([6, 4])
+        ctx.strokeRect(lx, ly, lw, lh)
+        ctx.fillStyle = 'rgba(204,136,0,0.08)'
+        ctx.fillRect(lx, ly, lw, lh)
+        ctx.setLineDash([])
+
+        // Highlight walls that intersect the lasso
+        let wallCount = 0
+        walls.forEach(w => {
+          const inStart = w.start.x >= x1w && w.start.x <= x2w && w.start.y >= y1w && w.start.y <= y2w
+          const inEnd = w.end.x >= x1w && w.end.x <= x2w && w.end.y >= y1w && w.end.y <= y2w
+          if (inStart || inEnd) {
+            const [ws, we] = [toScreen(w.start.x, w.start.y), toScreen(w.end.x, w.end.y)]
+            ctx.strokeStyle = '#cc8800'
+            ctx.lineWidth = 3
             ctx.beginPath()
-            ctx.arc(px, py, 6, 0, Math.PI * 2)
-            ctx.fillStyle = '#009944'
-            ctx.fill()
-            insideCount++
+            ctx.moveTo(ws[0], ws[1])
+            ctx.lineTo(we[0], we[1])
+            ctx.stroke()
+            wallCount++
           }
+        })
+        if (wallCount > 0) {
+          ctx.fillStyle = '#cc8800'
+          ctx.font = 'bold 11px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.fillText(`H/V → ${wallCount} lines`, (lassoStart.sx + lassoEnd.sx) / 2, Math.min(lassoStart.sy, lassoEnd.sy) - 6)
         }
-      })
-      if (insideCount >= 2) {
-        ctx.fillStyle = '#009944'
-        ctx.font = 'bold 11px sans-serif'
-        ctx.textAlign = 'center'
-        ctx.fillText(`Join ${insideCount} points`, (lassoStart.sx + lassoEnd.sx) / 2, Math.min(lassoStart.sy, lassoEnd.sy) - 6)
+      } else {
+        // Select tool lasso — green, join endpoints
+        ctx.strokeStyle = '#009944'
+        ctx.lineWidth = 1.5
+        ctx.setLineDash([6, 4])
+        ctx.strokeRect(lx, ly, lw, lh)
+        ctx.fillStyle = 'rgba(0,255,136,0.08)'
+        ctx.fillRect(lx, ly, lw, lh)
+        ctx.setLineDash([])
+
+        let insideCount = 0
+        walls.forEach(w => {
+          for (const pt of [w.start, w.end]) {
+            if (pt.x >= x1w && pt.x <= x2w && pt.y >= y1w && pt.y <= y2w) {
+              const [px, py] = toScreen(pt.x, pt.y)
+              ctx.beginPath()
+              ctx.arc(px, py, 6, 0, Math.PI * 2)
+              ctx.fillStyle = '#009944'
+              ctx.fill()
+              insideCount++
+            }
+          }
+        })
+        if (insideCount >= 2) {
+          ctx.fillStyle = '#009944'
+          ctx.font = 'bold 11px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.fillText(`Join ${insideCount} points`, (lassoStart.sx + lassoEnd.sx) / 2, Math.min(lassoStart.sy, lassoEnd.sy) - 6)
+        }
       }
     }
 
@@ -1406,6 +1442,10 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       if (hit) {
         useRoomStore.getState().applyHVConstraint(hit.wallId)
         selectWall(hit.wallId)
+      } else {
+        // Start drag-select lasso for batch H/V
+        setLassoStart({ sx: mx, sy: my })
+        setLassoEnd({ sx: mx, sy: my })
       }
       return
     }
@@ -1709,33 +1749,44 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
   }
 
   const handleMouseUp = () => {
-    // Lasso join — find all endpoints inside lasso rect, merge them to average point
+    // Lasso selection release
     if (lassoStart && lassoEnd) {
       const x1w = Math.min(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[0]))
       const y1w = Math.min(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[1]))
       const x2w = Math.max(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[0]))
       const y2w = Math.max(...[lassoStart, lassoEnd].map(p => toWorld(p.sx, p.sy)[1]))
 
-      // Collect all endpoints inside the lasso rectangle
-      const hits: { wallId: string; part: 'start' | 'end'; pt: Point2D }[] = []
-      walls.forEach(w => {
-        if (w.start.x >= x1w && w.start.x <= x2w && w.start.y >= y1w && w.start.y <= y2w) {
-          hits.push({ wallId: w.id, part: 'start', pt: w.start })
-        }
-        if (w.end.x >= x1w && w.end.x <= x2w && w.end.y >= y1w && w.end.y <= y2w) {
-          hits.push({ wallId: w.id, part: 'end', pt: w.end })
-        }
-      })
-
-      if (hits.length >= 2) {
-        // Merge all to average position
-        const avgX = snap(hits.reduce((s, h) => s + h.pt.x, 0) / hits.length)
-        const avgY = snap(hits.reduce((s, h) => s + h.pt.y, 0) / hits.length)
-        useRoomStore.getState().pushHistory()
-        hits.forEach(h => {
-          updateWall(h.wallId, { [h.part]: { x: avgX, y: avgY } })
+      if (sketchTool === 'hv') {
+        // H/V lasso — apply H/V to all walls with any endpoint inside
+        const wallIds = new Set<string>()
+        walls.forEach(w => {
+          const inStart = w.start.x >= x1w && w.start.x <= x2w && w.start.y >= y1w && w.start.y <= y2w
+          const inEnd = w.end.x >= x1w && w.end.x <= x2w && w.end.y >= y1w && w.end.y <= y2w
+          if (inStart || inEnd) wallIds.add(w.id)
         })
-        useRoomStore.getState().enforceConstraints()
+        if (wallIds.size > 0) {
+          useRoomStore.getState().applyHVConstraintBatch([...wallIds])
+        }
+      } else {
+        // Select tool lasso — join endpoints
+        const hits: { wallId: string; part: 'start' | 'end'; pt: Point2D }[] = []
+        walls.forEach(w => {
+          if (w.start.x >= x1w && w.start.x <= x2w && w.start.y >= y1w && w.start.y <= y2w) {
+            hits.push({ wallId: w.id, part: 'start', pt: w.start })
+          }
+          if (w.end.x >= x1w && w.end.x <= x2w && w.end.y >= y1w && w.end.y <= y2w) {
+            hits.push({ wallId: w.id, part: 'end', pt: w.end })
+          }
+        })
+        if (hits.length >= 2) {
+          const avgX = snap(hits.reduce((s, h) => s + h.pt.x, 0) / hits.length)
+          const avgY = snap(hits.reduce((s, h) => s + h.pt.y, 0) / hits.length)
+          useRoomStore.getState().pushHistory()
+          hits.forEach(h => {
+            updateWall(h.wallId, { [h.part]: { x: avgX, y: avgY } })
+          })
+          useRoomStore.getState().enforceConstraints()
+        }
       }
 
       setLassoStart(null)
