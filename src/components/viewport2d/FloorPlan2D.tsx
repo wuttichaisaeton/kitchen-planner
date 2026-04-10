@@ -370,6 +370,16 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         const oy2 = sy + dy * t2
         const clearR = Math.max(6, (w.thickness / 2) * scale + 4)
 
+        // Clear the opening gap — white rectangle to cut through polygon fill
+        ctx.fillStyle = '#ffffff'
+        ctx.beginPath()
+        ctx.moveTo(ox1 + nx * clearR, oy1 + ny * clearR)
+        ctx.lineTo(ox2 + nx * clearR, oy2 + ny * clearR)
+        ctx.lineTo(ox2 - nx * clearR, oy2 - ny * clearR)
+        ctx.lineTo(ox1 - nx * clearR, oy1 - ny * clearR)
+        ctx.closePath()
+        ctx.fill()
+
         if (op.type === 'door') {
           // Door properties
           const hingeAtStart = (op.hingePosition || 'start') === 'start'
