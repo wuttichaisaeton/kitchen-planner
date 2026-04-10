@@ -138,6 +138,8 @@ interface RoomState {
   removeGuide: (id: string) => void
   applyHVConstraint: (wallId: string) => void
   applyDimension: (wallId: string, newLength: number) => void
+  isOverConstrained: (wallId: string) => boolean
+  removeDimension: (wallId: string) => void
   autoJoinAll: () => void
   enforceConstraints: () => void
   clearWalls: () => void
@@ -443,6 +445,47 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     // Enforce all constraints
     newWalls = enforceAllConstraints(newWalls)
     set({ walls: newWalls })
+  },
+
+  // Check if dimensioning this wall would over-constrain the sketch
+  // For a closed polygon with H/V constraints:
+  // If all other H walls are dimensioned → this H wall is fully determined
+  // Same for V walls
+  isOverConstrained: (wallId: string) => {
+    const { walls } = get()
+    const w = walls.find(ww => ww.id === wallId)
+    if (!w) return false
+    if (w.dimensioned) return false // already dimensioned — allow editing
+
+    // Find which direction this wall primarily goes
+    const dx = Math.abs(w.end.x - w.start.x)
+    const dy = Math.abs(w.end.y - w.start.y)
+    const isH = dx >= dy // horizontal-ish
+
+    // Find all walls with same orientation (H or V constrained, or close to it)
+    const sameDir = walls.filter(ww => {
+      if (!ww.constraint) {
+        const wdx = Math.abs(ww.end.x - ww.start.x)
+        const wdy = Math.abs(ww.end.y - ww.start.y)
+        return isH ? wdx >= wdy : wdy > wdx
+      }
+      return isH ? ww.constraint === 'H' : ww.constraint === 'V'
+    })
+
+    // If all OTHER walls in same direction are dimensioned → this wall is over-constrained
+    const othersInDir = sameDir.filter(ww => ww.id !== wallId)
+    if (othersInDir.length === 0) return false
+
+    const allOthersDimensioned = othersInDir.every(ww => ww.dimensioned)
+    return allOthersDimensioned
+  },
+
+  // Remove dimension from a wall (un-dimension it)
+  removeDimension: (wallId: string) => {
+    get().pushHistory()
+    set(s => ({
+      walls: s.walls.map(w => w.id === wallId ? { ...w, dimensioned: false } : w)
+    }))
   },
 
   // Auto-join all walls — merge any endpoints within threshold

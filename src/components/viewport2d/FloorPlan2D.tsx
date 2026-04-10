@@ -83,6 +83,9 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
   // Dimension input ref for iPad focus
   const dimInputRef = useRef<HTMLInputElement>(null)
 
+  // Over-constrained warning
+  const [overConstrainedWallId, setOverConstrainedWallId] = useState<string | null>(null)
+
   // Editable dimension — wallId based, position computed dynamically
   const [editingDimWallId, setEditingDimWallId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
@@ -1055,6 +1058,14 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
   const openDimEditor = (wallId: string) => {
     const w = walls.find(ww => ww.id === wallId)
     if (!w) return
+
+    // Check over-constraint — already dimensioned walls can be edited
+    if (!w.dimensioned && useRoomStore.getState().isOverConstrained(wallId)) {
+      setOverConstrainedWallId(wallId)
+      selectWall(wallId)
+      return
+    }
+
     const len = Math.round(wallLength(w))
     setEditingDimWallId(wallId)
     setEditValue(String(len))
@@ -1633,6 +1644,38 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           </span>
         </div>
       )}
+      {/* Over-constrained warning dialog */}
+      {overConstrainedWallId && (() => {
+        const ocWall = walls.find(w => w.id === overConstrainedWallId)
+        const ocDim = ocWall ? getDimScreenPos(ocWall) : null
+        return (
+          <div
+            className="absolute bg-[#1e1e30] border border-yellow-500/60 rounded-lg shadow-2xl p-4"
+            style={{
+              left: ocDim ? Math.min(ocDim.labelX, 300) : 100,
+              top: ocDim ? Math.min(ocDim.labelY - 60, 200) : 100,
+              zIndex: 200,
+              maxWidth: 280,
+            }}
+            onMouseDown={e => e.stopPropagation()}
+            onTouchStart={e => e.stopPropagation()}
+          >
+            <div className="text-yellow-400 font-bold text-sm mb-2">Over-constrained</div>
+            <div className="text-gray-300 text-xs mb-3">
+              เส้นนี้ถูกกำหนดโดย dimension อื่นแล้ว ใส่ dimension เพิ่มจะทำให้ขัดแย้ง
+              <br />ต้องลบ dimension เส้นอื่นก่อน
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setOverConstrainedWallId(null)}
+                className="flex-1 bg-gray-600 hover:bg-gray-500 text-white text-xs font-bold px-3 py-1.5 rounded"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        )
+      })()}
     </div>
   )
 }
