@@ -292,7 +292,27 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
     const [ox, oy] = toScreen(0, 0)
 
-    // --- Draw sketch lines (walls as thin lines — Fusion 360 style) ---
+    // --- Fill interior black when walls form closed polygon ---
+    if (walls.length >= 3) {
+      const EPS_CLOSE = 10
+      const firstStart = walls[0].start
+      const lastEnd = walls[walls.length - 1].end
+      const isClosed = Math.abs(firstStart.x - lastEnd.x) < EPS_CLOSE && Math.abs(firstStart.y - lastEnd.y) < EPS_CLOSE
+
+      if (isClosed) {
+        ctx.fillStyle = '#000000'
+        ctx.beginPath()
+        walls.forEach((w, i) => {
+          const [sx, sy] = toScreen(w.start.x, w.start.y)
+          if (i === 0) ctx.moveTo(sx, sy)
+          else ctx.lineTo(sx, sy)
+        })
+        ctx.closePath()
+        ctx.fill()
+      }
+    }
+
+    // --- Draw sketch lines ---
     walls.forEach(w => {
       const [sx, sy] = toScreen(w.start.x, w.start.y)
       const [ex, ey] = toScreen(w.end.x, w.end.y)
