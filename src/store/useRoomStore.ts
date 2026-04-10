@@ -172,7 +172,7 @@ interface RoomState {
   updateWall: (id: string, updates: Partial<Pick<Wall, 'start' | 'end' | 'thickness' | 'height' | 'constraint' | 'dimensionValue'>>) => void
   removeWall: (id: string) => void
   selectWall: (id: string | null) => void
-  addOpening: (wallId: string, type: 'door' | 'window', clickOffsetRatio?: number) => void
+  addOpening: (wallId: string, type: 'door' | 'window', offsetMM?: number, widthMM?: number) => void
   updateOpening: (wallId: string, openingId: string, updates: Partial<Opening>) => void
   updateOpeningNoHistory: (wallId: string, openingId: string, updates: Partial<Opening>) => void
   removeOpening: (wallId: string, openingId: string) => void
@@ -310,7 +310,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
   selectWall: (id) => set({ selectedWallId: id }),
 
-  addOpening: (wallId, type, clickOffsetRatio) => {
+  addOpening: (wallId, type, offsetMM, widthMM) => {
     get().pushHistory()
     set(s => {
       const wall = s.walls.find(w => w.id === wallId)
@@ -318,15 +318,10 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       const dx = wall.end.x - wall.start.x
       const dy = wall.end.y - wall.start.y
       const wallLen = Math.sqrt(dx * dx + dy * dy)
-      const openingW = type === 'door' ? 900 : 1200
+      const openingW = widthMM ?? (type === 'door' ? 900 : 1200)
 
-      // Place at click position (centered on click), clamp to wall bounds
-      let offset: number
-      if (clickOffsetRatio !== undefined) {
-        offset = clickOffsetRatio * wallLen - openingW / 2
-      } else {
-        offset = (wallLen - openingW) / 2
-      }
+      // Use provided offset or center on wall
+      let offset = offsetMM ?? (wallLen - openingW) / 2
       // Clamp: at least 0, at most wallLen - openingW
       offset = Math.max(0, Math.min(wallLen - openingW, offset))
       // Snap to 50mm grid
@@ -336,7 +331,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
         id: uuid(),
         type,
         offsetFromStart: offset,
-        width: openingW,
+        width: Math.round(openingW / 50) * 50,
         height: type === 'door' ? 2100 : 1200,
         sillHeight: type === 'door' ? 0 : 900,
       }

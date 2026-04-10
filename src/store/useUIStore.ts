@@ -6,6 +6,20 @@ type SidePanel = 'catalog' | 'properties' | 'quotation'
 type LeftTab = 'catalog' | 'walls'
 export type SketchTool = 'select' | 'line' | 'rectangle' | 'dimension' | 'door' | 'window' | 'column' | 'trim' | 'construction' | 'offset' | 'fillet' | 'mirror' | 'hv' | 'perpendicular' | 'fix' | 'equal' | 'parallel' | 'coincident' | 'symmetric'
 
+const DEFAULT_FAVORITES: SketchTool[] = ['select', 'line', 'rectangle', 'door', 'window', 'dimension', 'trim']
+
+function loadFavorites(): SketchTool[] {
+  try {
+    const saved = localStorage.getItem('kp-favorite-tools')
+    if (saved) return JSON.parse(saved)
+  } catch { /* ignore */ }
+  return DEFAULT_FAVORITES
+}
+
+function saveFavorites(favs: SketchTool[]) {
+  try { localStorage.setItem('kp-favorite-tools', JSON.stringify(favs)) } catch { /* ignore */ }
+}
+
 interface UIState {
   viewMode: ViewMode
   activeTool: ActiveTool
@@ -16,6 +30,7 @@ interface UIState {
   leftTab: LeftTab
   sketchTool: SketchTool
   lastSketchTool: SketchTool
+  favoriteTools: SketchTool[]
   setViewMode: (m: ViewMode) => void
   setActiveTool: (t: ActiveTool) => void
   setSidePanel: (p: SidePanel) => void
@@ -24,6 +39,7 @@ interface UIState {
   toggleRight: () => void
   setLeftTab: (t: LeftTab) => void
   setSketchTool: (t: SketchTool) => void
+  toggleFavoriteTool: (t: SketchTool) => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -36,6 +52,7 @@ export const useUIStore = create<UIState>((set) => ({
   leftTab: 'catalog',
   sketchTool: 'line',
   lastSketchTool: 'line',
+  favoriteTools: loadFavorites(),
   setViewMode: (viewMode) => set({ viewMode }),
   setActiveTool: (activeTool) => set({ activeTool }),
   setSidePanel: (sidePanel) => set({ sidePanel }),
@@ -44,4 +61,11 @@ export const useUIStore = create<UIState>((set) => ({
   toggleRight: () => set(s => ({ rightOpen: !s.rightOpen })),
   setLeftTab: (leftTab) => set({ leftTab, leftOpen: true }),
   setSketchTool: (sketchTool) => set(s => ({ sketchTool, lastSketchTool: s.sketchTool !== 'select' ? s.sketchTool : s.lastSketchTool })),
+  toggleFavoriteTool: (tool) => set(s => {
+    const favs = s.favoriteTools.includes(tool)
+      ? s.favoriteTools.filter(t => t !== tool)
+      : [...s.favoriteTools, tool]
+    saveFavorites(favs)
+    return { favoriteTools: favs }
+  }),
 }))

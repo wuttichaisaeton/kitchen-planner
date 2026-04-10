@@ -5,6 +5,7 @@ import { usePlacementStore } from '../../store/usePlacementStore'
 import { catalogItems } from '../../data/catalogItems'
 import { Wall, Point2D } from '../../types/kitchen'
 import type { UseLeicaDistoReturn } from '../../hooks/useLeicaDisto'
+import ContextMenu from './ContextMenu'
 
 const GRID_SIZE = 100
 const SNAP = 50
@@ -83,6 +84,12 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
   // Lasso join — drag circle around endpoints to merge them
   const [lassoStart, setLassoStart] = useState<{ sx: number; sy: number } | null>(null)
   const [lassoEnd, setLassoEnd] = useState<{ sx: number; sy: number } | null>(null)
+
+  // Right-click context menu
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null)
+
+  // Two-click door/window drawing state
+  const [openingDraw, setOpeningDraw] = useState<{ wallId: string; offsetMM: number } | null>(null)
 
   // Dimension input ref for iPad focus
   const dimInputRef = useRef<HTMLInputElement>(null)
@@ -196,6 +203,8 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         setConstraintFirstWallId(null)
         setCoincidentFirst(null)
         setSelectedConstraintWallId(null)
+        setOpeningDraw(null)
+        setContextMenu(null)
         setSketchTool('select')
         return
       }
@@ -864,6 +873,63 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       ctx.setLineDash([])
     }
 
+    // --- Door/Window draw preview (two-click) ---
+    if (openingDraw && (sketchTool === 'door' || sketchTool === 'window')) {
+      const w = walls.find(ww => ww.id === openingDraw.wallId)
+      if (w) {
+        const [wsx, wsy] = toScreen(w.start.x, w.start.y)
+        const [wex, wey] = toScreen(w.end.x, w.end.y)
+        const wdx = wex - wsx, wdy = wey - wsy
+        const wlen = Math.sqrt(wdx * wdx + wdy * wdy)
+        const wLen = wallLength(w)
+        if (wlen > 1 && wLen > 1) {
+          const wnx = -wdy / wlen, wny = wdx / wlen
+          const halfT = Math.max(3, (w.thickness / 2) * scale)
+
+          // First click marker
+          const t1 = openingDraw.offsetMM / wLen
+          const p1x = wsx + wdx * t1, p1y = wsy + wdy * t1
+          ctx.fillStyle = sketchTool === 'door' ? '#8B4513' : '#0066cc'
+          ctx.beginPath()
+          ctx.arc(p1x, p1y, 4, 0, Math.PI * 2)
+          ctx.fill()
+
+          // Preview line to mouse position (projected onto wall)
+          const mwdx = w.end.x - w.start.x, mwdy = w.end.y - w.start.y
+          const mt = ((mouseWorld.x - w.start.x) * mwdx + (mouseWorld.y - w.start.y) * mwdy) / (mwdx * mwdx + mwdy * mwdy)
+          const clampT = Math.max(0, Math.min(1, mt))
+          const t2 = clampT
+          const p2x = wsx + wdx * t2, p2y = wsy + wdy * t2
+
+          // Preview rectangle (dashed)
+          ctx.strokeStyle = sketchTool === 'door' ? '#8B4513' : '#0066cc'
+          ctx.lineWidth = 1.5
+          ctx.setLineDash([4, 4])
+          ctx.beginPath()
+          ctx.moveTo(p1x + wnx * halfT, p1y + wny * halfT)
+          ctx.lineTo(p2x + wnx * halfT, p2y + wny * halfT)
+          ctx.lineTo(p2x - wnx * halfT, p2y - wny * halfT)
+          ctx.lineTo(p1x - wnx * halfT, p1y - wny * halfT)
+          ctx.closePath()
+          ctx.stroke()
+          ctx.setLineDash([])
+
+          // Preview width label
+          const previewW = Math.abs(clampT * wLen - openingDraw.offsetMM)
+          const pmx = (p1x + p2x) / 2, pmy = (p1y + p2y) / 2
+          ctx.font = 'bold 11px sans-serif'
+          ctx.textAlign = 'center'
+          ctx.textBaseline = 'middle'
+          const pwLabel = `${Math.round(previewW / 50) * 50}`
+          const ptw = ctx.measureText(pwLabel).width
+          ctx.fillStyle = '#ffffffcc'
+          ctx.fillRect(pmx - ptw / 2 - 3, pmy - wnx * halfT - 20, ptw + 6, 16)
+          ctx.fillStyle = sketchTool === 'door' ? '#8B4513' : '#0066cc'
+          ctx.fillText(pwLabel, pmx, pmy - wnx * halfT - 12)
+        }
+      }
+    }
+
     // Draw placed items (top-down)
     items.forEach(item => {
       const catItem = catalogItems.find(c => c.id === item.catalogItemId)
@@ -1407,9 +1473,26 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
     if (sketchTool === 'door' || sketchTool === 'window') {
       const hit = findWallAt(mx, my)
-      if (hit) {
-        addOpening(hit.wallId, sketchTool, hit.t)
+      if (!hit) return
+      const w = walls.find(ww => ww.id === hit.wallId)
+      if (!w) return
+      const wLen = wallLength(w)
+      const clickOffset = (hit.t ?? 0.5) * wLen
+
+      if (!openingDraw) {
+        // First click — set start point
+        setOpeningDraw({ wallId: hit.wallId, offsetMM: Math.round(clickOffset / 50) * 50 })
         selectWall(hit.wallId)
+      } else {
+        // Second click — create opening from first to second click
+        if (openingDraw.wallId === hit.wallId) {
+          const endOffset = Math.round(clickOffset / 50) * 50
+          const startOff = Math.min(openingDraw.offsetMM, endOffset)
+          const endOff = Math.max(openingDraw.offsetMM, endOffset)
+          const width = Math.max(100, endOff - startOff) // minimum 100mm
+          addOpening(hit.wallId, sketchTool, startOff, width)
+        }
+        setOpeningDraw(null)
       }
       return
     }
@@ -1708,7 +1791,10 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         onMouseLeave={handleMouseUp}
         onDoubleClick={handleDoubleClick}
         onWheel={handleWheel}
-        onContextMenu={e => e.preventDefault()}
+        onContextMenu={e => {
+          e.preventDefault()
+          setContextMenu({ x: e.clientX, y: e.clientY })
+        }}
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
         onTouchEnd={handleTouchEnd}
@@ -1908,6 +1994,15 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           </div>
         )
       })()}
+
+      {/* Right-click context menu */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   )
 }
