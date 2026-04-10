@@ -104,7 +104,7 @@ export default function OpeningDialog() {
                 onClick={() => {
                   setWidth(p.width)
                   setHeight(p.height)
-                  if ('sill' in p) setSillHeight(p.sill)
+                  if ('sill' in p) setSillHeight(p.sill as number)
                 }}
                 className={`text-[11px] px-2.5 py-1 rounded-full border transition-all ${
                   width === p.width && height === p.height
