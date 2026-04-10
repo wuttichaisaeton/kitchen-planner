@@ -871,7 +871,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     })
 
     // Scale bar
-    const scaleBarMM = scale > 0.1 ? 1000 : scale > 0.05 ? 2000 : 5000
+    const scaleBarMM = scale > 1 ? 100 : scale > 0.5 ? 200 : scale > 0.2 ? 500 : scale > 0.1 ? 1000 : scale > 0.05 ? 2000 : 5000
     const scaleBarPx = scaleBarMM * scale
     const sbX = W - 20 - scaleBarPx
     const sbY = H - 20
@@ -1551,7 +1551,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     e.preventDefault()
     const [mx, my] = getMousePos(e)
     const zoomFactor = e.deltaY > 0 ? 0.9 : 1.1
-    const newScale = Math.max(0.02, Math.min(0.5, scale * zoomFactor))
+    const newScale = Math.max(0.02, Math.min(2, scale * zoomFactor))
     const wxx = (mx - panX) / scale
     const wyy = (my - panY) / scale
     setPanX(mx - wxx * newScale)
@@ -1586,7 +1586,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
       // Pinch zoom
       const zoomFactor = dist / touchRef.current.lastDist
-      const newScale = Math.max(0.02, Math.min(0.5, scale * zoomFactor))
+      const newScale = Math.max(0.02, Math.min(2, scale * zoomFactor))
 
       // Pan (two-finger drag)
       const dx = midX - touchRef.current.lastMidX
