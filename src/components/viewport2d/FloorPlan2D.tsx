@@ -292,26 +292,6 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
     const [ox, oy] = toScreen(0, 0)
 
-    // --- Fill interior black when walls form closed polygon ---
-    if (walls.length >= 3) {
-      const EPS_CLOSE = 10
-      const firstStart = walls[0].start
-      const lastEnd = walls[walls.length - 1].end
-      const isClosed = Math.abs(firstStart.x - lastEnd.x) < EPS_CLOSE && Math.abs(firstStart.y - lastEnd.y) < EPS_CLOSE
-
-      if (isClosed) {
-        ctx.fillStyle = '#000000'
-        ctx.beginPath()
-        walls.forEach((w, i) => {
-          const [sx, sy] = toScreen(w.start.x, w.start.y)
-          if (i === 0) ctx.moveTo(sx, sy)
-          else ctx.lineTo(sx, sy)
-        })
-        ctx.closePath()
-        ctx.fill()
-      }
-    }
-
     // --- Draw sketch lines (walls as thin lines — Fusion 360 style) ---
     walls.forEach(w => {
       const [sx, sy] = toScreen(w.start.x, w.start.y)
@@ -368,32 +348,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         const oy1 = sy + dy * t
         const ox2 = sx + dx * t2
         const oy2 = sy + dy * t2
-        // Clear area — generous to fully cover any black fill
         const clearR = Math.max(6, (w.thickness / 2) * scale + 4)
-
-        // Always clear the gap first — large white rectangle
-        ctx.fillStyle = '#ffffff'
-        ctx.beginPath()
-        ctx.moveTo(ox1 + nx * clearR, oy1 + ny * clearR)
-        ctx.lineTo(ox2 + nx * clearR, oy2 + ny * clearR)
-        ctx.lineTo(ox2 - nx * clearR, oy2 - ny * clearR)
-        ctx.lineTo(ox1 - nx * clearR, oy1 - ny * clearR)
-        ctx.closePath()
-        ctx.fill()
-
-        // Re-draw wall stub lines at opening edges (thin lines showing wall thickness at gap edges)
-        ctx.strokeStyle = '#333333'
-        ctx.lineWidth = 1.2
-        // Left edge stub
-        ctx.beginPath()
-        ctx.moveTo(ox1 + nx * clearR, oy1 + ny * clearR)
-        ctx.lineTo(ox1 - nx * clearR, oy1 - ny * clearR)
-        ctx.stroke()
-        // Right edge stub
-        ctx.beginPath()
-        ctx.moveTo(ox2 + nx * clearR, oy2 + ny * clearR)
-        ctx.lineTo(ox2 - nx * clearR, oy2 - ny * clearR)
-        ctx.stroke()
 
         if (op.type === 'door') {
           // Door properties
