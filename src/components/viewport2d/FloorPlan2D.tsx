@@ -304,27 +304,153 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
     const [ox, oy] = toScreen(0, 0)
 
-    // --- Fill interior black when walls form closed polygon ---
-    if (walls.length >= 3) {
-      const EPS_CLOSE = 10
-      const firstStart = walls[0].start
-      const lastEnd = walls[walls.length - 1].end
-      const isClosed = Math.abs(firstStart.x - lastEnd.x) < EPS_CLOSE && Math.abs(firstStart.y - lastEnd.y) < EPS_CLOSE
+    // --- Fill wall thickness as thick rectangles per wall ---
+    walls.forEach(w => {
+      const [sx, sy] = toScreen(w.start.x, w.start.y)
+      const [ex, ey] = toScreen(w.end.x, w.end.y)
+      const ddx = ex - sx, ddy = ey - sy
+      const dlen = Math.sqrt(ddx * ddx + ddy * ddy)
+      if (dlen < 1) return
+      const nnx = -ddy / dlen, nny = ddx / dlen
+      const halfT = (w.thickness / 2) * scale
 
-      if (isClosed) {
-        ctx.fillStyle = '#000000'
+      ctx.fillStyle = '#222222'
+      ctx.beginPath()
+      ctx.moveTo(sx + nnx * halfT, sy + nny * halfT)
+      ctx.lineTo(ex + nnx * halfT, ey + nny * halfT)
+      ctx.lineTo(ex - nnx * halfT, ey - nny * halfT)
+      ctx.lineTo(sx - nnx * halfT, sy - nny * halfT)
+      ctx.closePath()
+      ctx.fill()
+    })
+
+    // --- Cut opening gaps (white) through wall fills ---
+    walls.forEach(w => {
+      const [sx, sy] = toScreen(w.start.x, w.start.y)
+      const [ex, ey] = toScreen(w.end.x, w.end.y)
+      const ddx = ex - sx, ddy = ey - sy
+      const dlen = Math.sqrt(ddx * ddx + ddy * ddy)
+      if (dlen < 1) return
+      const nnx = -ddy / dlen, nny = ddx / dlen
+      const halfT = (w.thickness / 2) * scale + 2
+
+      w.openings.forEach(op => {
+        const wLen = wallLength(w)
+        const t1 = op.offsetFromStart / wLen
+        const t2 = (op.offsetFromStart + op.width) / wLen
+        const ox1 = sx + ddx * t1, oy1 = sy + ddy * t1
+        const ox2 = sx + ddx * t2, oy2 = sy + ddy * t2
+
+        // White gap cutting through wall fill
+        ctx.fillStyle = '#ffffff'
         ctx.beginPath()
-        walls.forEach((w, i) => {
-          const [sx, sy] = toScreen(w.start.x, w.start.y)
-          if (i === 0) ctx.moveTo(sx, sy)
-          else ctx.lineTo(sx, sy)
-        })
+        ctx.moveTo(ox1 + nnx * halfT, oy1 + nny * halfT)
+        ctx.lineTo(ox2 + nnx * halfT, oy2 + nny * halfT)
+        ctx.lineTo(ox2 - nnx * halfT, oy2 - nny * halfT)
+        ctx.lineTo(ox1 - nnx * halfT, oy1 - nny * halfT)
         ctx.closePath()
         ctx.fill()
-      }
-    }
 
-    // --- Draw sketch lines ---
+        // Wall edge stubs at opening sides
+        ctx.strokeStyle = '#222222'
+        ctx.lineWidth = 2
+        ctx.beginPath()
+        ctx.moveTo(ox1 + nnx * halfT, oy1 + nny * halfT)
+        ctx.lineTo(ox1 - nnx * halfT, oy1 - nny * halfT)
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.moveTo(ox2 + nnx * halfT, oy2 + nny * halfT)
+        ctx.lineTo(ox2 - nnx * halfT, oy2 - nny * halfT)
+        ctx.stroke()
+
+        // Opening symbols centered in wall thickness
+        if (op.type === 'door') {
+          const hingeAtStart = (op.hingePosition || 'start') === 'start'
+          const swingSign = (op.swingSide || 'inside') === 'inside' ? 1 : -1
+          const hx = hingeAtStart ? ox1 : ox2
+          const hy = hingeAtStart ? oy1 : oy2
+          const fx = hingeAtStart ? ox2 : ox1
+          const fy = hingeAtStart ? oy2 : oy1
+          const doorR = Math.sqrt((ox2 - ox1) ** 2 + (oy2 - oy1) ** 2)
+
+          const leafX = hx + nnx * swingSign * doorR
+          const leafY = hy + nny * swingSign * doorR
+          ctx.strokeStyle = '#333333'
+          ctx.lineWidth = 1.5
+          ctx.beginPath()
+          ctx.moveTo(hx, hy)
+          ctx.lineTo(leafX, leafY)
+          ctx.stroke()
+
+          const leafAngle = Math.atan2(leafY - hy, leafX - hx)
+          const freeAngle = Math.atan2(fy - hy, fx - hx)
+          ctx.strokeStyle = '#999999'
+          ctx.lineWidth = 0.8
+          ctx.setLineDash([3, 3])
+          ctx.beginPath()
+          let diff = freeAngle - leafAngle
+          while (diff > Math.PI) diff -= 2 * Math.PI
+          while (diff < -Math.PI) diff += 2 * Math.PI
+          ctx.arc(hx, hy, doorR, leafAngle, freeAngle, diff < 0)
+          ctx.stroke()
+          ctx.setLineDash([])
+        } else if (op.type === 'fixed-glass') {
+          ctx.fillStyle = 'rgba(100, 180, 255, 0.3)'
+          ctx.beginPath()
+          ctx.moveTo(ox1 + nnx * halfT, oy1 + nny * halfT)
+          ctx.lineTo(ox2 + nnx * halfT, oy2 + nny * halfT)
+          ctx.lineTo(ox2 - nnx * halfT, oy2 - nny * halfT)
+          ctx.lineTo(ox1 - nnx * halfT, oy1 - nny * halfT)
+          ctx.closePath()
+          ctx.fill()
+          ctx.strokeStyle = '#333333'
+          ctx.lineWidth = 1.5
+          ctx.stroke()
+          ctx.strokeStyle = '#0066cc'
+          ctx.lineWidth = 0.8
+          ctx.beginPath()
+          ctx.moveTo(ox1 + nnx * halfT, oy1 + nny * halfT)
+          ctx.lineTo(ox2 - nnx * halfT, oy2 - nny * halfT)
+          ctx.moveTo(ox2 + nnx * halfT, oy2 + nny * halfT)
+          ctx.lineTo(ox1 - nnx * halfT, oy1 - nny * halfT)
+          ctx.stroke()
+        } else {
+          // Window — 3 parallel lines within wall thickness
+          ctx.strokeStyle = '#333333'
+          ctx.lineWidth = 1.5
+          ctx.beginPath()
+          ctx.moveTo(ox1 + nnx * halfT, oy1 + nny * halfT)
+          ctx.lineTo(ox2 + nnx * halfT, oy2 + nny * halfT)
+          ctx.stroke()
+          ctx.beginPath()
+          ctx.moveTo(ox1 - nnx * halfT, oy1 - nny * halfT)
+          ctx.lineTo(ox2 - nnx * halfT, oy2 - nny * halfT)
+          ctx.stroke()
+          ctx.strokeStyle = '#0066cc'
+          ctx.lineWidth = 1
+          ctx.beginPath()
+          ctx.moveTo(ox1, oy1)
+          ctx.lineTo(ox2, oy2)
+          ctx.stroke()
+        }
+
+        // Opening width label
+        const omx = (ox1 + ox2) / 2, omy = (oy1 + oy2) / 2
+        const labelOff = halfT + 12
+        const lx = omx - nnx * labelOff, ly = omy - nny * labelOff
+        ctx.font = '10px sans-serif'
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'middle'
+        const wLabel = `${Math.round(op.width)}`
+        const tw = ctx.measureText(wLabel).width
+        ctx.fillStyle = '#ffffffcc'
+        ctx.fillRect(lx - tw / 2 - 2, ly - 6, tw + 4, 12)
+        ctx.fillStyle = op.type === 'door' ? '#8B4513' : '#0066cc'
+        ctx.fillText(wLabel, lx, ly)
+      })
+    })
+
+    // --- Draw sketch lines (Lines — DO NOT CHANGE) ---
     walls.forEach(w => {
       const [sx, sy] = toScreen(w.start.x, w.start.y)
       const [ex, ey] = toScreen(w.end.x, w.end.y)
@@ -360,140 +486,6 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       ctx.moveTo(sx, sy)
       ctx.lineTo(ex, ey)
       ctx.stroke()
-
-      // Openings visualization
-      const dx = ex - sx
-      const dy = ey - sy
-      const len = Math.sqrt(dx * dx + dy * dy)
-      if (len < 1) return
-      const ux = dx / len
-      const uy = dy / len
-      const nx = -uy
-      const ny = ux
-      const thick = w.thickness * scale
-
-      w.openings.forEach(op => {
-        const wLen = wallLength(w)
-        const t = op.offsetFromStart / wLen
-        const t2 = (op.offsetFromStart + op.width) / wLen
-        const ox1 = sx + dx * t
-        const oy1 = sy + dy * t
-        const ox2 = sx + dx * t2
-        const oy2 = sy + dy * t2
-        const clearR = Math.max(6, (w.thickness / 2) * scale + 4)
-
-        // Clear the opening gap — white rectangle to cut through polygon fill
-        ctx.fillStyle = '#ffffff'
-        ctx.beginPath()
-        ctx.moveTo(ox1 + nx * clearR, oy1 + ny * clearR)
-        ctx.lineTo(ox2 + nx * clearR, oy2 + ny * clearR)
-        ctx.lineTo(ox2 - nx * clearR, oy2 - ny * clearR)
-        ctx.lineTo(ox1 - nx * clearR, oy1 - ny * clearR)
-        ctx.closePath()
-        ctx.fill()
-
-        if (op.type === 'door') {
-          // Door properties
-          const hingeAtStart = (op.hingePosition || 'start') === 'start'
-          const swingSign = (op.swingSide || 'inside') === 'inside' ? 1 : -1
-
-          // Hinge and free points
-          const hx = hingeAtStart ? ox1 : ox2
-          const hy = hingeAtStart ? oy1 : oy2
-          const fx = hingeAtStart ? ox2 : ox1
-          const fy = hingeAtStart ? oy2 : oy1
-
-          // Door screen width (radius of arc)
-          const doorR = Math.sqrt((ox2 - ox1) ** 2 + (oy2 - oy1) ** 2)
-
-          // Perpendicular direction from hinge (the open door leaf position)
-          const leafX = hx + nx * swingSign * doorR
-          const leafY = hy + ny * swingSign * doorR
-
-          // Door leaf line (straight line from hinge to leaf end)
-          ctx.strokeStyle = '#333333'
-          ctx.lineWidth = 1.5
-          ctx.beginPath()
-          ctx.moveTo(hx, hy)
-          ctx.lineTo(leafX, leafY)
-          ctx.stroke()
-
-          // Door swing arc (quarter circle from leaf to wall opening)
-          const leafAngle = Math.atan2(leafY - hy, leafX - hx)
-          const freeAngle = Math.atan2(fy - hy, fx - hx)
-          ctx.strokeStyle = '#999999'
-          ctx.lineWidth = 0.8
-          ctx.setLineDash([3, 3])
-          ctx.beginPath()
-          let diff = freeAngle - leafAngle
-          while (diff > Math.PI) diff -= 2 * Math.PI
-          while (diff < -Math.PI) diff += 2 * Math.PI
-          const ccw = diff < 0
-          ctx.arc(hx, hy, doorR, leafAngle, freeAngle, ccw)
-          ctx.stroke()
-          ctx.setLineDash([])
-        } else if (op.type === 'fixed-glass') {
-          // Fixed glass — filled blue rectangle (no opening mechanism)
-          const glassR = clearR * 0.5
-          ctx.fillStyle = 'rgba(100, 180, 255, 0.25)'
-          ctx.beginPath()
-          ctx.moveTo(ox1 + nx * glassR, oy1 + ny * glassR)
-          ctx.lineTo(ox2 + nx * glassR, oy2 + ny * glassR)
-          ctx.lineTo(ox2 - nx * glassR, oy2 - ny * glassR)
-          ctx.lineTo(ox1 - nx * glassR, oy1 - ny * glassR)
-          ctx.closePath()
-          ctx.fill()
-          // Outer frame
-          ctx.strokeStyle = '#333333'
-          ctx.lineWidth = 1.2
-          ctx.stroke()
-          // X cross (fixed glass symbol)
-          ctx.strokeStyle = '#0066cc'
-          ctx.lineWidth = 0.8
-          ctx.beginPath()
-          ctx.moveTo(ox1 + nx * glassR, oy1 + ny * glassR)
-          ctx.lineTo(ox2 - nx * glassR, oy2 - ny * glassR)
-          ctx.moveTo(ox2 + nx * glassR, oy2 + ny * glassR)
-          ctx.lineTo(ox1 - nx * glassR, oy1 - ny * glassR)
-          ctx.stroke()
-        } else {
-          // Window — three parallel lines
-          const lineOff = clearR * 0.5
-          ctx.strokeStyle = '#333333'
-          ctx.lineWidth = 1.5
-          ctx.beginPath()
-          ctx.moveTo(ox1 + nx * lineOff, oy1 + ny * lineOff)
-          ctx.lineTo(ox2 + nx * lineOff, oy2 + ny * lineOff)
-          ctx.stroke()
-          ctx.beginPath()
-          ctx.moveTo(ox1 - nx * lineOff, oy1 - ny * lineOff)
-          ctx.lineTo(ox2 - nx * lineOff, oy2 - ny * lineOff)
-          ctx.stroke()
-          // Center line (glass — blue)
-          ctx.strokeStyle = '#0066cc'
-          ctx.lineWidth = 1
-          ctx.beginPath()
-          ctx.moveTo(ox1, oy1)
-          ctx.lineTo(ox2, oy2)
-          ctx.stroke()
-        }
-
-        // Opening width label (small, centered on opening)
-        const omx = (ox1 + ox2) / 2
-        const omy = (oy1 + oy2) / 2
-        const labelOff = clearR + 10
-        const lx = omx - nx * labelOff
-        const ly = omy - ny * labelOff
-        ctx.font = '10px sans-serif'
-        ctx.textAlign = 'center'
-        ctx.textBaseline = 'middle'
-        const wLabel = `${Math.round(op.width)}`
-        const tw = ctx.measureText(wLabel).width
-        ctx.fillStyle = '#ffffffcc'
-        ctx.fillRect(lx - tw / 2 - 2, ly - 6, tw + 4, 12)
-        ctx.fillStyle = op.type === 'door' ? '#8B4513' : '#0066cc'
-        ctx.fillText(wLabel, lx, ly)
-      })
 
       // Endpoint dots — show connected (green) vs open (gray/blue)
       const EPS_DRAW = 5 // 5mm tolerance for connected check
