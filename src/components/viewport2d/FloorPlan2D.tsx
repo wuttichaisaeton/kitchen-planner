@@ -324,7 +324,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       ctx.stroke()
     })
 
-    // === PASS 2: Cut openings and draw symbols ===
+    // === PASS 2: Cut openings, draw symbols, endpoints, constraints ===
     walls.forEach(w => {
       const [sx, sy] = toScreen(w.start.x, w.start.y)
       const [ex, ey] = toScreen(w.end.x, w.end.y)
@@ -337,6 +337,12 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       const nx = -uy
       const ny = ux
       const halfT = (w.thickness / 2) * scale
+
+      const isSelected = w.id === selectedWallId
+      const isHovered = w.id === hoverWallId
+      const isEditing = w.id === editingDimWallId
+      const isTrimHover = sketchTool === 'trim' && isHovered
+      const isConstrained = !!(w.constraint)
 
       w.openings.forEach(op => {
         const wLen = wallLength(w)
