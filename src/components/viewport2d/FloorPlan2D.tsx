@@ -276,55 +276,11 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     const W = rect.width
     const H = rect.height
 
-    // Fusion 360 dark canvas
-    ctx.fillStyle = '#2d2d3d'
+    // White background — clean architectural drawing style
+    ctx.fillStyle = '#ffffff'
     ctx.fillRect(0, 0, W, H)
 
-    // Grid (Fusion 360 style — subtle dark lines)
-    const gridPx = GRID_SIZE * scale
-    if (gridPx > 6) {
-      const startWX = -panX / scale
-      const startWY = -panY / scale
-      const endWX = (W - panX) / scale
-      const endWY = (H - panY) / scale
-
-      // Minor grid
-      const gx0 = Math.floor(startWX / GRID_SIZE) * GRID_SIZE
-      const gy0 = Math.floor(startWY / GRID_SIZE) * GRID_SIZE
-      ctx.strokeStyle = '#363648'
-      ctx.lineWidth = 0.5
-      for (let wx = gx0; wx <= endWX; wx += GRID_SIZE) {
-        const [sx] = toScreen(wx, 0)
-        ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, H); ctx.stroke()
-      }
-      for (let wy = gy0; wy <= endWY; wy += GRID_SIZE) {
-        const [, sy] = toScreen(0, wy)
-        ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(W, sy); ctx.stroke()
-      }
-
-      // Major grid lines every 1000mm
-      ctx.strokeStyle = '#404058'
-      ctx.lineWidth = 0.8
-      const mg = 1000
-      const mgx0 = Math.floor(startWX / mg) * mg
-      const mgy0 = Math.floor(startWY / mg) * mg
-      for (let wx = mgx0; wx <= endWX; wx += mg) {
-        const [sx] = toScreen(wx, 0)
-        ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, H); ctx.stroke()
-      }
-      for (let wy = mgy0; wy <= endWY; wy += mg) {
-        const [, sy] = toScreen(0, wy)
-        ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(W, sy); ctx.stroke()
-      }
-    }
-
-    // Origin crosshair
     const [ox, oy] = toScreen(0, 0)
-    ctx.strokeStyle = '#ff444466'
-    ctx.lineWidth = 1
-    ctx.beginPath(); ctx.moveTo(ox, 0); ctx.lineTo(ox, H); ctx.stroke()
-    ctx.strokeStyle = '#44ff4466'
-    ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(W, oy); ctx.stroke()
 
     // --- Fill interior black when walls form closed polygon ---
     if (walls.length >= 3) {
@@ -357,28 +313,24 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
       // Determine constraint state for color
       const isConstrained = !!(w.constraint)
-      // Sketch line colors — Fusion 360 style:
-      // Blue = unconstrained, White = constrained, Green = fixed
-      // (selected/hovered/editing override for feedback)
+      // Wall line colors on white background
       if (isTrimHover) {
-        ctx.strokeStyle = '#ff4444'
+        ctx.strokeStyle = '#ff0000'
         ctx.lineWidth = 3
       } else if (isEditing) {
-        ctx.strokeStyle = '#00ccff'
+        ctx.strokeStyle = '#0066cc'
         ctx.lineWidth = 2.5
       } else if (isSelected) {
-        ctx.strokeStyle = '#00aaff'
+        ctx.strokeStyle = '#0055aa'
         ctx.lineWidth = 2.5
       } else if (isHovered) {
-        ctx.strokeStyle = '#66ccff'
+        ctx.strokeStyle = '#3388cc'
         ctx.lineWidth = 2
       } else if (isConstrained) {
-        // Has H or V constraint → white (fully constrained direction)
-        ctx.strokeStyle = '#e0e0e8'
+        ctx.strokeStyle = '#222222'
         ctx.lineWidth = 1.5
       } else {
-        // No constraint → blue (under-constrained)
-        ctx.strokeStyle = '#4488ff'
+        ctx.strokeStyle = '#555555'
         ctx.lineWidth = 1.5
       }
 
@@ -457,19 +409,16 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         }
         const dotR = isSelected || isHovered ? 5 : 3.5
         if (isConnected) {
-          // Connected = filled green dot
-          ctx.fillStyle = '#00ff88'
+          ctx.fillStyle = '#009944'
           ctx.beginPath()
           ctx.arc(px, py, dotR, 0, Math.PI * 2)
           ctx.fill()
         } else {
-          // Open endpoint = hollow circle
-          ctx.fillStyle = isSelected ? '#00aaff' : isHovered ? '#66ccff' : '#aaaabb'
+          ctx.fillStyle = isSelected ? '#0055aa' : isHovered ? '#3388cc' : '#888888'
           ctx.beginPath()
           ctx.arc(px, py, dotR, 0, Math.PI * 2)
           ctx.fill()
-          // White hollow center for open endpoints
-          ctx.fillStyle = '#2d2d3d'
+          ctx.fillStyle = '#ffffff'
           ctx.beginPath()
           ctx.arc(px, py, dotR - 2, 0, Math.PI * 2)
           ctx.fill()
@@ -493,10 +442,9 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           const isGlyphSelected = selectedConstraintWallId === w.id
           const boxSize = 14
 
-          // Background box — brighten when hovered or selected
-          ctx.fillStyle = (isGlyphSelected || isGlyphHovered) ? '#2a2a4eee' : '#1a1a2ecc'
-          ctx.strokeStyle = w.constraint === 'H' ? (isGlyphSelected ? '#ff8888' : isGlyphHovered ? '#ff6666' : '#ff4444')
-                                                  : (isGlyphSelected ? '#88ff88' : isGlyphHovered ? '#66ff66' : '#44ff44')
+          // Background box
+          ctx.fillStyle = (isGlyphSelected || isGlyphHovered) ? '#ffffffee' : '#ffffffcc'
+          ctx.strokeStyle = w.constraint === 'H' ? '#cc0000' : '#008800'
           ctx.lineWidth = (isGlyphSelected || isGlyphHovered) ? 2 : 1.5
           ctx.beginPath()
           ctx.roundRect(iconX - boxSize / 2, iconY - boxSize / 2, boxSize, boxSize, 3)
@@ -504,9 +452,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           ctx.stroke()
 
           // H or V letter
-          ctx.fillStyle = w.constraint === 'H'
-            ? (isGlyphSelected ? '#ffaaaa' : '#ff6666')
-            : (isGlyphSelected ? '#aaffaa' : '#66ff66')
+          ctx.fillStyle = w.constraint === 'H' ? '#cc0000' : '#008800'
           ctx.font = 'bold 10px sans-serif'
           ctx.textAlign = 'center'
           ctx.textBaseline = 'middle'
@@ -535,8 +481,8 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           const dimFontSize = Math.max(10, Math.min(14, 12 / Math.sqrt(scale / 0.15)))
 
           // Color scheme: dimensioned = green (like Fusion 360), selected = cyan
-          const dimColor = isDimensioned ? '#44cc44' : '#00ccff'
-          const dimColorAlpha = isDimensioned ? '#44cc4488' : '#00ccff88'
+          const dimColor = isDimensioned ? '#008800' : '#0066cc'
+          const dimColorAlpha = isDimensioned ? '#00880088' : '#0066cc88'
 
           if (!showDimLine && !isSelected) {
             // Skip dimension lines/arrows — only show clickable label for dimension tool
@@ -603,7 +549,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
             // Box background
             ctx.fillStyle = '#1a1a2eee'
-            ctx.strokeStyle = isDimensioned ? '#44cc4488' : '#00ccff88'
+            ctx.strokeStyle = isDimensioned ? '#00880088' : '#0066cc88'
             ctx.lineWidth = 1
             ctx.beginPath()
             ctx.roundRect(bx, by, boxW, boxH, 3)
@@ -611,7 +557,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
             ctx.stroke()
 
             // Label text — green if dimensioned, cyan otherwise
-            ctx.fillStyle = isDimensioned ? '#44cc44' : '#00ccff'
+            ctx.fillStyle = isDimensioned ? '#008800' : '#0066cc'
             ctx.textAlign = 'center'
             ctx.textBaseline = 'middle'
             ctx.fillText(label, labelX, labelY)
@@ -713,10 +659,10 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       ctx.font = `bold ${dimFontSize + 2}px sans-serif`
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
-      ctx.fillStyle = '#ffffff22'
+      ctx.fillStyle = '#00000022'
       ctx.fillText(`${sqm} m\u00B2`, roomCX, roomCY - 8)
       ctx.font = `${dimFontSize - 1}px sans-serif`
-      ctx.fillStyle = '#ffffff18'
+      ctx.fillStyle = '#00000018'
       ctx.fillText(`${Math.round(perimeter)} mm`, roomCX, roomCY + 10)
     }
 
@@ -727,7 +673,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       const [ex, ey] = toScreen(snapped.x, snapped.y)
 
       // Preview line
-      ctx.strokeStyle = '#00aaff'
+      ctx.strokeStyle = '#0055aa'
       ctx.lineWidth = 2
       ctx.setLineDash([6, 4])
       ctx.beginPath()
@@ -762,21 +708,21 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
         // Dark bg box (Fusion 360 style)
         ctx.fillStyle = '#1a1a2eee'
-        ctx.strokeStyle = '#00aaff88'
+        ctx.strokeStyle = '#0055aa88'
         ctx.lineWidth = 1
         ctx.beginPath()
         ctx.roundRect(lx - boxW / 2, ly - boxH / 2, boxW, boxH, 3)
         ctx.fill()
         ctx.stroke()
 
-        ctx.fillStyle = '#00ccff'
+        ctx.fillStyle = '#0066cc'
         ctx.textAlign = 'center'
         ctx.textBaseline = 'middle'
         ctx.fillText(label, lx, ly)
       }
 
       // Start/end points
-      ctx.fillStyle = '#00aaff'
+      ctx.fillStyle = '#0055aa'
       ctx.beginPath(); ctx.arc(sx, sy, 4, 0, Math.PI * 2); ctx.fill()
       ctx.fillStyle = '#00ffaa'
       ctx.beginPath(); ctx.arc(ex, ey, 4, 0, Math.PI * 2); ctx.fill()
@@ -788,7 +734,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       const [x1, y1] = toScreen(rectStart.x, rectStart.y)
       const [x2, y2] = toScreen(snapped.x, snapped.y)
 
-      ctx.strokeStyle = '#00aaff'
+      ctx.strokeStyle = '#0055aa'
       ctx.lineWidth = 2
       ctx.setLineDash([6, 4])
       ctx.strokeRect(Math.min(x1, x2), Math.min(y1, y2), Math.abs(x2 - x1), Math.abs(y2 - y1))
@@ -797,7 +743,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       // Size labels
       const rw = Math.abs(snapped.x - rectStart.x)
       const rh = Math.abs(snapped.y - rectStart.y)
-      ctx.fillStyle = '#00ccff'
+      ctx.fillStyle = '#0066cc'
       ctx.font = 'bold 11px monospace'
       ctx.textAlign = 'center'
       ctx.textBaseline = 'middle'
@@ -811,18 +757,18 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       if (snapResult.snapped) {
         const [snapSx, snapSy] = toScreen(snapResult.x, snapResult.y)
         // Outer green ring
-        ctx.strokeStyle = '#00ff88'
+        ctx.strokeStyle = '#009944'
         ctx.lineWidth = 2.5
         ctx.beginPath()
         ctx.arc(snapSx, snapSy, 10, 0, Math.PI * 2)
         ctx.stroke()
         // Inner green dot
-        ctx.fillStyle = '#00ff88'
+        ctx.fillStyle = '#009944'
         ctx.beginPath()
         ctx.arc(snapSx, snapSy, 3, 0, Math.PI * 2)
         ctx.fill()
         // Label
-        ctx.fillStyle = '#00ff88'
+        ctx.fillStyle = '#009944'
         ctx.font = 'bold 9px sans-serif'
         ctx.textAlign = 'center'
         ctx.fillText('SNAP', snapSx, snapSy - 15)
@@ -858,7 +804,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         catItem.category === 'sink' ? 'rgba(80, 140, 180, 0.4)' :
         'rgba(100, 100, 120, 0.4)'
       ctx.fillRect(-iw / 2, -id / 2, iw, id)
-      ctx.strokeStyle = '#8888aa'
+      ctx.strokeStyle = '#999999'
       ctx.lineWidth = 1
       ctx.strokeRect(-iw / 2, -id / 2, iw, id)
       ctx.fillStyle = '#ccccdd'
@@ -875,19 +821,19 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     const scaleBarPx = scaleBarMM * scale
     const sbX = W - 20 - scaleBarPx
     const sbY = H - 20
-    ctx.strokeStyle = '#666688'
+    ctx.strokeStyle = '#999999'
     ctx.lineWidth = 2
     ctx.beginPath(); ctx.moveTo(sbX, sbY); ctx.lineTo(sbX + scaleBarPx, sbY); ctx.stroke()
     ctx.lineWidth = 1
     ctx.beginPath(); ctx.moveTo(sbX, sbY - 5); ctx.lineTo(sbX, sbY + 5); ctx.stroke()
     ctx.beginPath(); ctx.moveTo(sbX + scaleBarPx, sbY - 5); ctx.lineTo(sbX + scaleBarPx, sbY + 5); ctx.stroke()
-    ctx.fillStyle = '#8888aa'
+    ctx.fillStyle = '#666666'
     ctx.font = '10px sans-serif'
     ctx.textAlign = 'center'
     ctx.fillText(`${scaleBarMM} mm`, sbX + scaleBarPx / 2, sbY - 10)
 
     // Coordinate display
-    ctx.fillStyle = '#8888aa'
+    ctx.fillStyle = '#666666'
     ctx.font = '10px monospace'
     ctx.textAlign = 'left'
     ctx.fillText(`X: ${Math.round(mouseWorld.x)}  Y: ${Math.round(mouseWorld.y)} mm`, 10, H - 10)
@@ -899,7 +845,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       ctx.font = 'bold 10px monospace'
       ctx.fillText(`\u25CF ${distoHook.deviceName || 'DISTO'} connected`, W - 10, H - 24)
       if (distoHook.lastMeasurement) {
-        ctx.fillStyle = '#00ccff'
+        ctx.fillStyle = '#0066cc'
         ctx.font = 'bold 12px monospace'
         ctx.fillText(`\u21A6 ${distoHook.lastMeasurement} mm`, W - 10, H - 10)
       }
@@ -911,7 +857,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       const ly = Math.min(lassoStart.sy, lassoEnd.sy)
       const lw = Math.abs(lassoEnd.sx - lassoStart.sx)
       const lh = Math.abs(lassoEnd.sy - lassoStart.sy)
-      ctx.strokeStyle = '#00ff88'
+      ctx.strokeStyle = '#009944'
       ctx.lineWidth = 1.5
       ctx.setLineDash([6, 4])
       ctx.strokeRect(lx, ly, lw, lh)
@@ -931,14 +877,14 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
             const [px, py] = toScreen(pt.x, pt.y)
             ctx.beginPath()
             ctx.arc(px, py, 6, 0, Math.PI * 2)
-            ctx.fillStyle = '#00ff88'
+            ctx.fillStyle = '#009944'
             ctx.fill()
             insideCount++
           }
         }
       })
       if (insideCount >= 2) {
-        ctx.fillStyle = '#00ff88'
+        ctx.fillStyle = '#009944'
         ctx.font = 'bold 11px sans-serif'
         ctx.textAlign = 'center'
         ctx.fillText(`Join ${insideCount} points`, (lassoStart.sx + lassoEnd.sx) / 2, Math.min(lassoStart.sy, lassoEnd.sy) - 6)
@@ -952,12 +898,12 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           const [px, py] = toScreen(pt.x, pt.y)
           // Highlight the first selected point with a pulsing ring
           if (coincidentFirst && coincidentFirst.wallId === w.id && coincidentFirst.part === part) {
-            ctx.strokeStyle = '#ffcc00'
+            ctx.strokeStyle = '#cc8800'
             ctx.lineWidth = 2.5
             ctx.beginPath()
             ctx.arc(px, py, 10, 0, Math.PI * 2)
             ctx.stroke()
-            ctx.fillStyle = '#ffcc00'
+            ctx.fillStyle = '#cc8800'
             ctx.beginPath()
             ctx.arc(px, py, 4, 0, Math.PI * 2)
             ctx.fill()
@@ -972,7 +918,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         }
       })
       // Show "Select 1st point" or "Select 2nd point" hint
-      ctx.fillStyle = '#ffcc00'
+      ctx.fillStyle = '#cc8800'
       ctx.font = 'bold 12px sans-serif'
       ctx.textAlign = 'left'
       ctx.fillText(coincidentFirst ? '⬤ Select 2nd point to merge' : '○ Select 1st point', 10, H - 30)
@@ -1674,8 +1620,8 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
             style={{
               width: 150,
               background: '#1a1a2e',
-              borderColor: '#00ccff',
-              color: '#00ccff',
+              borderColor: '#0066cc',
+              color: '#0066cc',
               fontSize: 20,
               touchAction: 'auto',
               WebkitUserSelect: 'text',
