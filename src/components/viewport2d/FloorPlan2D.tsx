@@ -371,26 +371,53 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           ctx.closePath()
           ctx.fill()
 
-          // Door leaf line (from hinge to door edge)
+          // Door properties
+          const hingeAtStart = (op.hingePosition || 'start') === 'start'
+          const swingSign = (op.swingSide || 'inside') === 'inside' ? 1 : -1
+
+          // Hinge and free points
+          const hx = hingeAtStart ? ox1 : ox2
+          const hy = hingeAtStart ? oy1 : oy2
+          const fx = hingeAtStart ? ox2 : ox1
+          const fy = hingeAtStart ? oy2 : oy1
+
+          // Door screen width (radius of arc)
+          const doorR = Math.sqrt((ox2 - ox1) ** 2 + (oy2 - oy1) ** 2)
+
+          // Perpendicular direction from hinge (the open door leaf position)
+          const leafX = hx + nx * swingSign * doorR
+          const leafY = hy + ny * swingSign * doorR
+
+          // Door leaf line (straight line from hinge to leaf end)
           ctx.strokeStyle = '#333333'
           ctx.lineWidth = 1.5
           ctx.beginPath()
-          ctx.moveTo(ox1, oy1)
-          // Door swings perpendicular — leaf goes to one side
-          ctx.lineTo(ox1 + nx * (op.width * scale), oy1 + ny * (op.width * scale))
+          ctx.moveTo(hx, hy)
+          ctx.lineTo(leafX, leafY)
           ctx.stroke()
 
-          // Door swing arc (quarter circle, small)
-          const doorScreenW = Math.sqrt((ox2 - ox1) ** 2 + (oy2 - oy1) ** 2)
-          const angle = Math.atan2(oy2 - oy1, ox2 - ox1)
-          const arcAngle = Math.atan2(ny, nx)
+          // Door swing arc (quarter circle from leaf to wall opening)
+          const leafAngle = Math.atan2(leafY - hy, leafX - hx)
+          const freeAngle = Math.atan2(fy - hy, fx - hx)
           ctx.strokeStyle = '#999999'
           ctx.lineWidth = 0.8
           ctx.setLineDash([3, 3])
           ctx.beginPath()
-          ctx.arc(ox1, oy1, doorScreenW, arcAngle, angle, false)
+          // Determine arc direction: sweep from leaf to free point
+          // Check if going counterclockwise is shorter
+          let diff = freeAngle - leafAngle
+          while (diff > Math.PI) diff -= 2 * Math.PI
+          while (diff < -Math.PI) diff += 2 * Math.PI
+          const ccw = diff < 0
+          ctx.arc(hx, hy, doorR, leafAngle, freeAngle, ccw)
           ctx.stroke()
           ctx.setLineDash([])
+
+          // Hinge dot indicator
+          ctx.fillStyle = '#333333'
+          ctx.beginPath()
+          ctx.arc(hx, hy, 3, 0, Math.PI * 2)
+          ctx.fill()
         } else {
           // Window — architectural floor plan style
           // Clear wall gap

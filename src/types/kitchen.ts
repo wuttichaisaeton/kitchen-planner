@@ -7,6 +7,8 @@ export interface Opening {
   width: number
   height: number
   sillHeight: number
+  hingePosition?: 'start' | 'end'   // Which end of opening has hinge (default 'start')
+  swingSide?: 'inside' | 'outside'  // Which side door swings to (default 'inside' = normal side)
 }
 
 export type WallConstraint = 'H' | 'V' | null

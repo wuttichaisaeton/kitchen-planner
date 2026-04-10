@@ -12,6 +12,9 @@ function OpeningRow({ wallId, opening }: { wallId: string; opening: Opening }) {
   const updateOpening = useRoomStore(s => s.updateOpening)
   const removeOpening = useRoomStore(s => s.removeOpening)
 
+  const hinge = opening.hingePosition || 'start'
+  const swing = opening.swingSide || 'inside'
+
   return (
     <div className="bg-gray-800/60 rounded p-2 space-y-1.5">
       <div className="flex items-center justify-between">
@@ -64,6 +67,29 @@ function OpeningRow({ wallId, opening }: { wallId: string; opening: Opening }) {
           />
         </label>
       </div>
+
+      {/* Door swing controls */}
+      {opening.type === 'door' && (
+        <div className="space-y-1">
+          <div className="flex gap-1">
+            <button
+              onClick={() => updateOpening(wallId, opening.id, { hingePosition: hinge === 'start' ? 'end' : 'start' })}
+              className="flex-1 bg-gray-700 hover:bg-gray-600 text-[10px] py-1 rounded border border-gray-600"
+              title="Toggle hinge side"
+            >
+              Hinge: {hinge === 'start' ? '← Left' : 'Right →'}
+            </button>
+            <button
+              onClick={() => updateOpening(wallId, opening.id, { swingSide: swing === 'inside' ? 'outside' : 'inside' })}
+              className="flex-1 bg-gray-700 hover:bg-gray-600 text-[10px] py-1 rounded border border-gray-600"
+              title="Toggle swing direction"
+            >
+              Swing: {swing === 'inside' ? 'Inside ↓' : 'Outside ↑'}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="text-[10px] text-gray-500 text-right">mm</div>
     </div>
   )
