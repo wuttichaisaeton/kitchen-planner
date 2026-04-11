@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import { PlacedItem } from '../types/kitchen'
 import { catalogItems } from '../data/catalogItems'
 import { v4 as uuid } from 'uuid'
@@ -17,7 +18,7 @@ interface PlacementState {
 
 const SNAP_THRESHOLD = 60 // mm — snap distance
 
-export const usePlacementStore = create<PlacementState>((set, get) => ({
+export const usePlacementStore = create<PlacementState>()(persist((set, get) => ({
   items: [],
   selectedId: null,
   nextX: 0,
@@ -120,4 +121,10 @@ export const usePlacementStore = create<PlacementState>((set, get) => ({
 
   selectItem: (id) => set({ selectedId: id }),
   clearAll: () => set({ items: [], selectedId: null, nextX: 0 }),
+}), {
+  name: 'kp-placement',
+  partialize: (state) => ({
+    items: state.items,
+    nextX: state.nextX,
+  }),
 }))

@@ -100,8 +100,8 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
   const [editingDimWallId, setEditingDimWallId] = useState<string | null>(null)
   const [editValue, setEditValue] = useState('')
 
-  // Editable opening offset
-  const [editingOpening, setEditingOpening] = useState<{ wallId: string; openingId: string } | null>(null)
+  // Editable opening offset — dimension-style inline edit
+  const [editingOpening, setEditingOpening] = useState<{ wallId: string; openingId: string; side: 'left' | 'right' } | null>(null)
   const [editOpeningValue, setEditOpeningValue] = useState('')
   const openingInputRef = useRef<HTMLInputElement>(null)
 
@@ -176,6 +176,57 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     const interiorLen = Math.round(wLen)
 
     return { sx: d1x, sy: d1y, ex: d2x, ey: d2y, labelX, labelY, length: interiorLen }
+  }, [walls, toScreen])
+
+  // Compute opening offset dimension label positions on wall (outer side, opposite of wall dim)
+  const getOpeningOffsetDims = useCallback((w: Wall) => {
+    if (w.openings.length === 0) return []
+    const [sx, sy] = toScreen(w.start.x, w.start.y)
+    const [ex, ey] = toScreen(w.end.x, w.end.y)
+    const dx = ex - sx, dy = ey - sy
+    const len = Math.sqrt(dx * dx + dy * dy)
+    if (len < 30) return []
+    const nx = -dy / len, ny = dx / len
+
+    // Room center → inDir → outDir (opposite side of wall dim)
+    let roomCX = 0, roomCY = 0
+    walls.forEach(ww => { const [a, b] = toScreen(ww.start.x, ww.start.y); roomCX += a; roomCY += b })
+    if (walls.length > 0) { roomCX /= walls.length; roomCY /= walls.length }
+    const midX = (sx + ex) / 2, midY = (sy + ey) / 2
+    const testX = midX + nx * 10, testY = midY + ny * 10
+    const inDir = Math.sqrt((testX - roomCX) ** 2 + (testY - roomCY) ** 2) < Math.sqrt((midX - roomCX) ** 2 + (midY - roomCY) ** 2) ? 1 : -1
+    const outDir = -inDir
+    const dimOff = 22
+
+    const wLen = wallLength(w)
+    const results: { openingId: string; side: 'left' | 'right'; labelX: number; labelY: number; value: number;
+      x1: number; y1: number; x2: number; y2: number; extSx: number; extSy: number; extEx: number; extEy: number }[] = []
+
+    for (const op of w.openings) {
+      const t1 = op.offsetFromStart / wLen
+      const t2 = (op.offsetFromStart + op.width) / wLen
+      const ox1 = sx + dx * t1, oy1 = sy + dy * t1
+      const ox2 = sx + dx * t2, oy2 = sy + dy * t2
+
+      const leftVal = Math.round(op.offsetFromStart)
+      if (leftVal > 0) {
+        const lx1 = sx + nx * outDir * dimOff, ly1 = sy + ny * outDir * dimOff
+        const lx2 = ox1 + nx * outDir * dimOff, ly2 = oy1 + ny * outDir * dimOff
+        results.push({ openingId: op.id, side: 'left', value: leftVal,
+          labelX: (lx1 + lx2) / 2, labelY: (ly1 + ly2) / 2,
+          x1: lx1, y1: ly1, x2: lx2, y2: ly2, extSx: sx, extSy: sy, extEx: ox1, extEy: oy1 })
+      }
+
+      const rightVal = Math.round(wLen - op.offsetFromStart - op.width)
+      if (rightVal > 0) {
+        const rx1 = ox2 + nx * outDir * dimOff, ry1 = oy2 + ny * outDir * dimOff
+        const rx2 = ex + nx * outDir * dimOff, ry2 = ey + ny * outDir * dimOff
+        results.push({ openingId: op.id, side: 'right', value: rightVal,
+          labelX: (rx1 + rx2) / 2, labelY: (ry1 + ry2) / 2,
+          x1: rx1, y1: ry1, x2: rx2, y2: ry2, extSx: ox2, extSy: oy2, extEx: ex, extEy: ey })
+      }
+    }
+    return results
   }, [walls, toScreen])
 
   // Returns screen-space center {x, y} of the constraint glyph for a wall, or null
@@ -499,6 +550,86 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
         ctx.fillStyle = op.type === 'door' ? '#8B4513' : '#0066cc'
         ctx.fillText(wLabel, lx, ly)
       })
+
+      // Opening offset dimensions — shown when wall is selected (dimension-style)
+      if (isSelected && w.openings.length > 0) {
+        const offDims = getOpeningOffsetDims(w)
+
+        // Wall-end reference markers — colored circles at wall start (A=orange) and end (B=cyan)
+        const markerR = 6
+        const dimOff2 = 22
+        // Compute outDir same as getOpeningOffsetDims
+        let rCX = 0, rCY = 0
+        walls.forEach(ww2 => { const [a2, b2] = toScreen(ww2.start.x, ww2.start.y); rCX += a2; rCY += b2 })
+        if (walls.length > 0) { rCX /= walls.length; rCY /= walls.length }
+        const mX2 = (sx + ex) / 2, mY2 = (sy + ey) / 2
+        const nxW = -(ey - sy) / Math.max(1, Math.sqrt((ex-sx)**2+(ey-sy)**2)), nyW = (ex - sx) / Math.max(1, Math.sqrt((ex-sx)**2+(ey-sy)**2))
+        const tX2 = mX2 + nxW * 10, tY2 = mY2 + nyW * 10
+        const inD = Math.sqrt((tX2-rCX)**2+(tY2-rCY)**2) < Math.sqrt((mX2-rCX)**2+(mY2-rCY)**2) ? 1 : -1
+        const outD = -inD
+        // Marker A at wall start (on dim line level)
+        const mAx = sx + nxW * outD * dimOff2, mAy = sy + nyW * outD * dimOff2
+        ctx.fillStyle = '#e67e22'
+        ctx.beginPath(); ctx.arc(mAx, mAy, markerR, 0, Math.PI * 2); ctx.fill()
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+        ctx.fillText('A', mAx, mAy)
+        // Marker B at wall end
+        const mBx = ex + nxW * outD * dimOff2, mBy = ey + nyW * outD * dimOff2
+        ctx.fillStyle = '#2980b9'
+        ctx.beginPath(); ctx.arc(mBx, mBy, markerR, 0, Math.PI * 2); ctx.fill()
+        ctx.fillStyle = '#fff'; ctx.font = 'bold 9px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+        ctx.fillText('B', mBx, mBy)
+
+        for (const od of offDims) {
+          const isEditingThis = editingOpening?.wallId === w.id && editingOpening?.openingId === od.openingId && editingOpening?.side === od.side
+          if (isEditingThis) continue // don't draw label when editing
+
+          // Dim line color: orange for left (from A), cyan for right (from B)
+          const dimColor = od.side === 'left' ? '#e67e22' : '#2980b9'
+
+          // Dimension line
+          ctx.strokeStyle = dimColor + '88'
+          ctx.lineWidth = 1
+          ctx.beginPath(); ctx.moveTo(od.x1, od.y1); ctx.lineTo(od.x2, od.y2); ctx.stroke()
+
+          // Extension lines
+          ctx.strokeStyle = dimColor + '44'
+          ctx.lineWidth = 0.5
+          ctx.beginPath(); ctx.moveTo(od.extSx, od.extSy); ctx.lineTo(od.x1, od.y1); ctx.stroke()
+          ctx.beginPath(); ctx.moveTo(od.extEx, od.extEy); ctx.lineTo(od.x2, od.y2); ctx.stroke()
+
+          // Arrowheads
+          const adx = od.x2 - od.x1, ady = od.y2 - od.y1
+          const alen = Math.sqrt(adx * adx + ady * ady)
+          if (alen > 20) {
+            const aux = adx / alen, auy = ady / alen
+            ctx.fillStyle = dimColor
+            ctx.beginPath()
+            ctx.moveTo(od.x1, od.y1)
+            ctx.lineTo(od.x1 + aux * 5 + auy * 2.5, od.y1 + auy * 5 - aux * 2.5)
+            ctx.lineTo(od.x1 + aux * 5 - auy * 2.5, od.y1 + auy * 5 + aux * 2.5)
+            ctx.closePath(); ctx.fill()
+            ctx.beginPath()
+            ctx.moveTo(od.x2, od.y2)
+            ctx.lineTo(od.x2 - aux * 5 + auy * 2.5, od.y2 - auy * 5 - aux * 2.5)
+            ctx.lineTo(od.x2 - aux * 5 - auy * 2.5, od.y2 - auy * 5 + aux * 2.5)
+            ctx.closePath(); ctx.fill()
+          }
+
+          // Label box — colored by side
+          const label = String(od.value)
+          ctx.font = 'bold 11px sans-serif'
+          const tw2 = ctx.measureText(label).width
+          const bw = tw2 + 10, bh = 16
+          ctx.fillStyle = '#ffffffee'
+          ctx.strokeStyle = dimColor + '88'
+          ctx.lineWidth = 1
+          ctx.beginPath(); ctx.roundRect(od.labelX - bw / 2, od.labelY - bh / 2, bw, bh, 3); ctx.fill(); ctx.stroke()
+          ctx.fillStyle = dimColor
+          ctx.textAlign = 'center'; ctx.textBaseline = 'middle'
+          ctx.fillText(label, od.labelX, od.labelY)
+        }
+      }
 
       // Endpoint dots — show connected (green) vs open (gray/blue)
       const EPS_DRAW = 5 // 5mm tolerance for connected check
@@ -1134,7 +1265,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       ctx.fillText(coincidentFirst ? '⬤ Select 2nd point to merge' : '○ Select 1st point', 10, H - 30)
     }
 
-  }, [walls, columns, guides, items, panX, panY, scale, selectedWallId, hoverWallId, hoveredConstraintWallId, selectedConstraintWallId, toScreen, editingDimWallId, drawStart, rectStart, mouseWorld, sketchTool, snapToEndpoint, dragTarget, getDimScreenPos, canvasReady, distoHook, lassoStart, lassoEnd, coincidentFirst])
+  }, [walls, columns, guides, items, panX, panY, scale, selectedWallId, hoverWallId, hoveredConstraintWallId, selectedConstraintWallId, toScreen, editingDimWallId, drawStart, rectStart, mouseWorld, sketchTool, snapToEndpoint, dragTarget, getDimScreenPos, getOpeningOffsetDims, editingOpening, canvasReady, distoHook, lassoStart, lassoEnd, coincidentFirst])
 
   // Force initial draw + resize observer
   useEffect(() => {
@@ -1169,6 +1300,20 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     }
     return null
   }, [walls, selectedWallId, editingDimWallId, sketchTool, getDimScreenPos])
+
+  // Find opening offset dimension label at mouse position
+  const findOpeningOffsetAt = useCallback((mx: number, my: number): { wallId: string; openingId: string; side: 'left' | 'right'; value: number } | null => {
+    for (const w of walls) {
+      if (w.id !== selectedWallId) continue
+      const dims = getOpeningOffsetDims(w)
+      for (const d of dims) {
+        if (Math.abs(mx - d.labelX) < 35 && Math.abs(my - d.labelY) < 15) {
+          return { wallId: w.id, openingId: d.openingId, side: d.side, value: d.value }
+        }
+      }
+    }
+    return null
+  }, [walls, selectedWallId, getOpeningOffsetDims])
 
   // Find constraint glyph at mouse position — returns wallId or null
   const findConstraintGlyphAt = useCallback((mx: number, my: number): string | null => {
@@ -1287,8 +1432,10 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
 
   // Parse dimension value — auto-detect meters vs mm from S910
   const parseDimValue = (raw: string): number => {
+    // Convert Thai digits ๐-๙ to 0-9
+    let cleaned = raw.replace(/[๐-๙]/g, c => String('๐๑๒๓๔๕๖๗๘๙'.indexOf(c)))
     // Clean up: remove spaces, commas → dots
-    let cleaned = raw.trim().replace(/,/g, '.').replace(/\s/g, '')
+    cleaned = cleaned.trim().replace(/,/g, '.').replace(/\s/g, '')
     // Remove trailing units if S910 sends them
     cleaned = cleaned.replace(/mm$/i, '').replace(/m$/i, '')
 
@@ -1325,8 +1472,20 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     if (!editingOpening) return
     const val = parseDimValue(editOpeningValue)
     if (val < 0) { setEditingOpening(null); return }
+
+    let offsetFromStart = val
+    // If editing from the right side, convert to offsetFromStart
+    if (editingOpening.side === 'right') {
+      const w = walls.find(ww => ww.id === editingOpening.wallId)
+      const op = w?.openings.find(o => o.id === editingOpening.openingId)
+      if (w && op) {
+        offsetFromStart = wallLength(w) - val - op.width
+        if (offsetFromStart < 0) offsetFromStart = 0
+      }
+    }
+
     useRoomStore.getState().pushHistory()
-    useRoomStore.getState().updateOpening(editingOpening.wallId, editingOpening.openingId, { offsetFromStart: val })
+    useRoomStore.getState().updateOpening(editingOpening.wallId, editingOpening.openingId, { offsetFromStart })
     setEditingOpening(null)
   }
 
@@ -1404,6 +1563,16 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
     }
     // Clicking elsewhere clears constraint glyph selection
     setSelectedConstraintWallId(null)
+
+    // --- Check opening offset dimension label click ---
+    const opDimHit = findOpeningOffsetAt(mx, my)
+    if (opDimHit) {
+      setEditingOpening({ wallId: opDimHit.wallId, openingId: opDimHit.openingId, side: opDimHit.side })
+      setEditOpeningValue(String(opDimHit.value))
+      setEditingDimWallId(null)
+      selectWall(opDimHit.wallId)
+      return
+    }
 
     // --- Check dimension label click first (any tool) ---
     const dimHit = findDimAt(mx, my)
@@ -1665,7 +1834,7 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
       const w = walls.find(ww => ww.id === opHit.wallId)
       const op = w?.openings.find(o => o.id === opHit.openingId)
       if (op) {
-        setEditingOpening(opHit)
+        setEditingOpening({ ...opHit, side: 'left' })
         setEditOpeningValue(String(Math.round(op.offsetFromStart)))
         setEditingDimWallId(null)
         selectWall(opHit.wallId)
@@ -1952,8 +2121,10 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
             value={editValue}
             onFocus={e => e.target.select()}
             onChange={e => {
-              // Accept numbers, dots, commas from S910
-              const v = e.target.value.replace(/[^0-9.,\s]/g, '')
+              // Accept Thai digits ๐-๙ and convert to 0-9, plus numbers, dots, commas
+              const v = e.target.value
+                .replace(/[๐-๙]/g, c => String('๐๑๒๓๔๕๖๗๘๙'.indexOf(c)))
+                .replace(/[^0-9.,\s]/g, '')
               setEditValue(v)
             }}
             onKeyDown={e => {
@@ -1981,10 +2152,10 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
           <div className="flex gap-2 mt-1">
             <button
               onClick={() => setEditingDimWallId(null)}
-              className="bg-gray-600 hover:bg-gray-500 text-white text-xs font-bold px-3 py-1.5 rounded"
-              style={{ touchAction: 'auto' }}
+              className="bg-gray-500 hover:bg-gray-400 text-white text-xs px-3 py-1 rounded"
+              style={{ touchAction: 'auto', fontSize: 10 }}
             >
-              Cancel
+              cancel / ยกเลิก
             </button>
             {editingDimWallId && walls.find(w => w.id === editingDimWallId)?.dimensionValue && (
               <button
@@ -1992,45 +2163,59 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
                   useRoomStore.getState().removeDimension(editingDimWallId)
                   setEditingDimWallId(null)
                 }}
-                className="bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-3 py-1.5 rounded"
-                style={{ touchAction: 'auto' }}
+                className="bg-red-600 hover:bg-red-500 text-white text-xs px-3 py-1 rounded"
+                style={{ touchAction: 'auto', fontSize: 10 }}
               >
-                Remove
+                remove / ลบ
               </button>
             )}
             <button
               onClick={applyDimEdit}
-              className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold px-4 py-1.5 rounded"
-              style={{ touchAction: 'auto' }}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1 rounded"
+              style={{ touchAction: 'auto', fontSize: 10 }}
             >
-              Apply
+              apply / ตกลง
             </button>
           </div>
-          <span style={{ color: '#666', fontSize: 10, marginTop: 2 }}>
-            mm (or m auto-convert)
+          <span style={{ color: '#999', fontSize: 9, marginTop: 2 }}>
+            mm (or m / เมตร auto-convert)
           </span>
         </div>
       )}
-      {/* Opening offset editor */}
+      {/* Opening offset editor — dimension-style inline (positioned at dim label) */}
       {editingOpening && (() => {
         const w = walls.find(ww => ww.id === editingOpening.wallId)
-        const op = w?.openings.find(o => o.id === editingOpening.openingId)
-        if (!w || !op) return null
-        const wLen = wallLength(w)
-        const [sx, sy] = toScreen(w.start.x, w.start.y)
-        const [ex, ey] = toScreen(w.end.x, w.end.y)
-        const dx = ex - sx, dy = ey - sy
-        const t = (op.offsetFromStart + op.width / 2) / wLen
-        const cx = sx + dx * t, cy = sy + dy * t
+        if (!w) return null
+        const dims = getOpeningOffsetDims(w)
+        const dim = dims.find(d => d.openingId === editingOpening.openingId && d.side === editingOpening.side)
+        if (!dim) return null
+        const otherSide = editingOpening.side === 'left' ? 'right' : 'left'
+        const otherDim = dims.find(d => d.openingId === editingOpening.openingId && d.side === otherSide)
+        const sideLabel = editingOpening.side === 'left'
+          ? '◄ from left / จากซ้าย'
+          : 'from right / จากขวา ►'
         return (
           <div
             className="absolute flex flex-col items-center"
-            style={{ left: cx - 75, top: cy - 50, zIndex: 100 }}
+            style={{ left: dim.labelX - 90, top: dim.labelY - 34, zIndex: 100, touchAction: 'auto' }}
+            onTouchStart={e => e.stopPropagation()}
+            onTouchMove={e => e.stopPropagation()}
+            onTouchEnd={e => e.stopPropagation()}
             onMouseDown={e => e.stopPropagation()}
           >
-            <span style={{ color: '#8B4513', fontSize: 11, fontWeight: 700, marginBottom: 2 }}>
-              ระยะจากริมผนัง (mm)
-            </span>
+            <div className="flex items-center gap-1 mb-1">
+              <span style={{ color: '#888', fontSize: 10 }}>{sideLabel}</span>
+              {otherDim && (
+                <button
+                  onClick={() => {
+                    setEditingOpening({ ...editingOpening, side: otherSide })
+                    setEditOpeningValue(String(otherDim.value))
+                  }}
+                  className="text-xs px-1.5 py-0.5 rounded border hover:bg-gray-100"
+                  style={{ borderColor: '#aaa', color: '#888', fontSize: 10, touchAction: 'auto', cursor: 'pointer' }}
+                >↔</button>
+              )}
+            </div>
             <input
               ref={openingInputRef}
               type="text"
@@ -2038,23 +2223,31 @@ export default function FloorPlan2D({ distoHook }: FloorPlan2DProps) {
               enterKeyHint="done"
               value={editOpeningValue}
               onFocus={e => e.target.select()}
-              onChange={e => setEditOpeningValue(e.target.value.replace(/[^0-9.,\s]/g, ''))}
+              onChange={e => {
+                // Accept Thai digits ๐-๙ and convert to 0-9
+                const v = e.target.value
+                  .replace(/[๐-๙]/g, c => String('๐๑๒๓๔๕๖๗๘๙'.indexOf(c)))
+                  .replace(/[^0-9.,\s]/g, '')
+                setEditOpeningValue(v)
+              }}
               onKeyDown={e => {
                 if (e.key === 'Enter') { e.preventDefault(); applyOpeningOffsetEdit() }
                 if (e.key === 'Escape') setEditingOpening(null)
               }}
               className="border-2 rounded px-2 py-1 text-sm text-center font-bold shadow-lg outline-none"
-              style={{ width: 150, background: '#fff', borderColor: '#8B4513', color: '#8B4513', fontSize: 20 }}
+              style={{ width: 150, background: '#fff', borderColor: '#8B4513', color: '#333', fontSize: 20, touchAction: 'auto', WebkitUserSelect: 'text', userSelect: 'text' }}
               placeholder="mm"
             />
             <div className="flex gap-2 mt-1">
               <button onClick={() => setEditingOpening(null)}
-                className="bg-gray-600 hover:bg-gray-500 text-white text-xs font-bold px-3 py-1.5 rounded">
-                Cancel
+                className="bg-gray-500 hover:bg-gray-400 text-white text-xs px-3 py-1 rounded"
+                style={{ touchAction: 'auto', fontSize: 10 }}>
+                cancel / ยกเลิก
               </button>
               <button onClick={applyOpeningOffsetEdit}
-                className="bg-amber-700 hover:bg-amber-600 text-white text-xs font-bold px-4 py-1.5 rounded">
-                Apply
+                className="bg-amber-700 hover:bg-amber-600 text-white text-xs px-3 py-1 rounded"
+                style={{ touchAction: 'auto', fontSize: 10 }}>
+                apply / ตกลง
               </button>
             </div>
           </div>

@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import { Wall, Point2D, Opening, Column, GuideLine } from '../types/kitchen'
 import { v4 as uuid } from 'uuid'
 
@@ -193,7 +194,7 @@ interface RoomState {
   clearWalls: () => void
 }
 
-export const useRoomStore = create<RoomState>((set, get) => ({
+export const useRoomStore = create<RoomState>()(persist((set, get) => ({
   walls: [],
   columns: [],
   guides: [],
@@ -657,4 +658,12 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     get().pushHistory()
     set({ walls: [], columns: [], guides: [], selectedWallId: null })
   },
+}), {
+  name: 'kp-room',
+  partialize: (state) => ({
+    walls: state.walls,
+    columns: state.columns,
+    guides: state.guides,
+    ceilingHeight: state.ceilingHeight,
+  }),
 }))

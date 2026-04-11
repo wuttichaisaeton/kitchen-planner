@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react'
+import { useState, useRef, useEffect, type ReactElement } from 'react'
 import { useUIStore, type SketchTool } from '../../store/useUIStore'
 import { useRoomStore } from '../../store/useRoomStore'
 
@@ -254,6 +254,95 @@ const statusText: Record<string, string> = {
   symmetric: 'Click two walls and a center line for symmetry.',
 }
 
+function HVDropdownButton({ isActive }: { isActive: boolean }) {
+  const [open, setOpen] = useState(false)
+  const btnRef = useRef<HTMLButtonElement>(null)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [menuPos, setMenuPos] = useState({ top: 0, left: 0 })
+  const setSketchTool = useUIStore(s => s.setSketchTool)
+  const applyHVAll = useRoomStore(s => s.applyHVConstraintAll)
+
+  useEffect(() => {
+    if (!open) return
+    const timer = setTimeout(() => {
+      const close = (e: MouseEvent) => {
+        if (menuRef.current && !menuRef.current.contains(e.target as Node) &&
+            btnRef.current && !btnRef.current.contains(e.target as Node)) {
+          setOpen(false)
+        }
+      }
+      document.addEventListener('mousedown', close)
+      cleanup = () => document.removeEventListener('mousedown', close)
+    }, 50)
+    let cleanup: (() => void) | undefined
+    return () => { clearTimeout(timer); cleanup?.() }
+  }, [open])
+
+  const toggleMenu = () => {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect()
+      const menuW = 180
+      const left = Math.min(rect.left, window.innerWidth - menuW - 8)
+      setMenuPos({ top: rect.bottom + 2, left })
+    }
+    setOpen(!open)
+  }
+
+  return (
+    <>
+      <div className="flex">
+        <button
+          onClick={() => setSketchTool('hv')}
+          title="H/V — Click wall (H)"
+          className={`flex flex-col items-center justify-center w-10 h-10 rounded-l transition-all ${
+            isActive
+              ? 'bg-blue-600/30 border border-blue-500/60 text-blue-300'
+              : 'hover:bg-gray-700/40 text-gray-400 hover:text-gray-200 border border-transparent'
+          }`}
+        >
+          {tools.find(t => t.id === 'hv')!.icon}
+          <span className="text-[7px] mt-px leading-none">H/V</span>
+        </button>
+        <button
+          ref={btnRef}
+          onClick={toggleMenu}
+          title="H/V Options"
+          className={`flex items-center justify-center w-4 h-10 rounded-r border-l-0 transition-all ${
+            isActive || open
+              ? 'bg-blue-600/30 border border-blue-500/60 text-blue-300'
+              : 'hover:bg-gray-700/40 text-gray-400 hover:text-gray-200 border border-transparent'
+          }`}
+        >
+          <svg viewBox="0 0 8 5" className="w-2 h-2" fill="currentColor"><path d="M0 0l4 5 4-5z" /></svg>
+        </button>
+      </div>
+      {open && (
+        <div
+          ref={menuRef}
+          className="fixed bg-[#2a2a40] border border-gray-600 rounded shadow-xl min-w-[170px]"
+          style={{ top: menuPos.top, left: menuPos.left, zIndex: 9999 }}
+        >
+          <button
+            onClick={() => { setSketchTool('hv'); setOpen(false) }}
+            className="w-full text-left px-3 py-2.5 text-xs text-gray-200 hover:bg-blue-600/30 flex items-center gap-2 rounded-t"
+          >
+            <svg viewBox="0 0 16 16" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2}><line x1="2" y1="8" x2="14" y2="8" /></svg>
+            Click each wall
+          </button>
+          <div className="border-t border-gray-600/50" />
+          <button
+            onClick={() => { applyHVAll(); setOpen(false) }}
+            className="w-full text-left px-3 py-2.5 text-xs text-amber-300 hover:bg-amber-600/30 flex items-center gap-2 font-bold rounded-b"
+          >
+            <svg viewBox="0 0 16 16" className="w-3 h-3" fill="none" stroke="currentColor" strokeWidth={2}><line x1="2" y1="5" x2="14" y2="5" /><line x1="2" y1="11" x2="14" y2="11" /></svg>
+            Apply to ALL walls
+          </button>
+        </div>
+      )}
+    </>
+  )
+}
+
 export default function SketchToolbar() {
   const sketchTool = useUIStore(s => s.sketchTool)
   const setSketchTool = useUIStore(s => s.setSketchTool)
@@ -273,19 +362,23 @@ export default function SketchToolbar() {
             <div className="flex flex-col items-center">
               <div className="flex gap-px">
                 {group.items.map(tool => (
-                  <button
-                    key={tool.id}
-                    onClick={() => setSketchTool(tool.id)}
-                    title={`${tool.label} (${tool.shortcut})`}
-                    className={`flex flex-col items-center justify-center w-10 h-10 rounded transition-all ${
-                      sketchTool === tool.id
-                        ? 'bg-blue-600/30 border border-blue-500/60 text-blue-300'
-                        : 'hover:bg-gray-700/40 text-gray-400 hover:text-gray-200 border border-transparent'
-                    }`}
-                  >
-                    {tool.icon}
-                    <span className="text-[7px] mt-px leading-none">{tool.label}</span>
-                  </button>
+                  tool.id === 'hv' ? (
+                    <HVDropdownButton key="hv" isActive={sketchTool === 'hv'} />
+                  ) : (
+                    <button
+                      key={tool.id}
+                      onClick={() => setSketchTool(tool.id)}
+                      title={`${tool.label} (${tool.shortcut})`}
+                      className={`flex flex-col items-center justify-center w-10 h-10 rounded transition-all ${
+                        sketchTool === tool.id
+                          ? 'bg-blue-600/30 border border-blue-500/60 text-blue-300'
+                          : 'hover:bg-gray-700/40 text-gray-400 hover:text-gray-200 border border-transparent'
+                      }`}
+                    >
+                      {tool.icon}
+                      <span className="text-[7px] mt-px leading-none">{tool.label}</span>
+                    </button>
+                  )
                 ))}
               </div>
               <span className="text-[7px] text-gray-500 mt-px">{group.name}</span>
